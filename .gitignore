@@ -10,3 +10,6 @@ build/
 # Editor and Windows download metadata
 .idea/
 *:Zone.Identifier
+
+# Python bytecode from the bake scripts
+__pycache__/
