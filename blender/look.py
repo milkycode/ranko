@@ -12,7 +12,8 @@ import numpy as np
 
 import model
 
-BLUE = (0.09, 0.17, 0.78)
+BLUE = (0.07, 0.19, 0.80)
+TONE_SCALE = 1.25  # the tone is stored divided by this, to stay under 1
 VIOLET = (0.17, 0.08, 0.52)
 
 
@@ -33,6 +34,22 @@ def _patches(tree, scale=3.2):
     ramp.color_ramp.elements[1].position = 0.70
     tree.links.new(noise.outputs["Fac"], ramp.inputs["Fac"])
     return ramp
+
+
+def _toned(tree, color):
+    """`color` times the body's `tone` attribute (hair takes it from the
+    skin at its root), so shaded places darken the coat."""
+    tone = tree.nodes.new("ShaderNodeAttribute")
+    tone.attribute_name = "tone"
+    scaled = _node(tree, "ShaderNodeMath", Value_001=TONE_SCALE)
+    scaled.operation = "MULTIPLY"
+    tree.links.new(tone.outputs["Fac"], scaled.inputs[0])
+    mul = _node(tree, "ShaderNodeMix", Factor=1.0)
+    mul.data_type = "RGBA"
+    mul.blend_type = "MULTIPLY"
+    tree.links.new(color, mul.inputs["A"])
+    tree.links.new(scaled.outputs["Value"], mul.inputs["B"])
+    return mul.outputs["Result"]
 
 
 def fur_material():
@@ -65,7 +82,7 @@ def fur_material():
     tree.links.new(coat.outputs["Result"], tinted.inputs["A"])
     tree.links.new(shade.outputs["Color"], tinted.inputs["B"])
 
-    tree.links.new(tinted.outputs["Result"], hair.inputs["Color"])
+    tree.links.new(_toned(tree, tinted.outputs["Result"]), hair.inputs["Color"])
     tree.links.new(hair.outputs["BSDF"], tree.nodes["Material Output"].inputs["Surface"])
     return mat
 
@@ -84,7 +101,7 @@ def skin_material():
     coat.inputs["A"].default_value = tuple(c * 0.55 for c in BLUE) + (1,)
     coat.inputs["B"].default_value = tuple(c * 0.55 for c in VIOLET) + (1,)
     tree.links.new(patches.outputs["Color"], coat.inputs["Factor"])
-    tree.links.new(coat.outputs["Result"], bsdf.inputs["Base Color"])
+    tree.links.new(_toned(tree, coat.outputs["Result"]), bsdf.inputs["Base Color"])
     return mat
 
 
@@ -121,9 +138,11 @@ def eye_material():
     tree.links.new(unit.outputs["Vector"], facing.inputs[0])
 
     ramp = tree.nodes.new("ShaderNodeValToRGB")
-    stops = [(0.0, (0.86, 0.86, 0.88)), (0.895, (0.86, 0.86, 0.88)), (0.905, (0.06, 0.06, 0.08)),
-             (0.925, (0.20, 0.21, 0.24)), (0.968, (0.12, 0.12, 0.14)), (0.974, (0.004, 0.004, 0.005)),
-             (1.0, (0.004, 0.004, 0.005))]
+    # A big iris, about half the eye across, and a big pupil in it.
+    white, ring, iris, inner, pupil = (0.80, 0.80, 0.82), (0.04, 0.04, 0.05), (0.30, 0.30, 0.33), \
+        (0.20, 0.20, 0.22), (0.003, 0.003, 0.004)
+    stops = [(0.0, white), (0.852, white), (0.861, ring), (0.874, iris), (0.938, inner), (0.951, ring),
+             (0.955, pupil), (1.0, pupil)]
     elements = ramp.color_ramp.elements
     while len(elements) < len(stops):
         elements.new(0.5)
@@ -135,7 +154,7 @@ def eye_material():
     return mat
 
 
-def add_fur(body, weights, count=140000, length=0.016):
+def add_fur(body, weights, count=160000, length=0.013):
     """Hair over the body, its density from `weights` (a vertex group)."""
     mod = body.modifiers.new("Fur", "PARTICLE_SYSTEM")
     psys = mod.particle_system
@@ -150,15 +169,15 @@ def add_fur(body, weights, count=140000, length=0.016):
     ps.material = 1  # counted from 1: the body's first slot, Fur
     ps.child_type = "INTERPOLATED"
     ps.child_percent = 4
-    ps.rendered_child_count = 12
+    ps.rendered_child_count = 14
     ps.child_length = 1.0
-    ps.clump_factor = 0.30
+    ps.clump_factor = 0.20
     ps.clump_shape = 0.25
     ps.roughness_1 = 0.006
     ps.roughness_1_size = 1.0
     ps.roughness_endpoint = 0.008
     ps.roughness_end_shape = 1.0
-    ps.root_radius = 0.0008
+    ps.root_radius = 0.0007
     ps.tip_radius = 0.0
     ps.radius_scale = 1.0
     ps.display_step = 3
@@ -179,20 +198,31 @@ def dress(parts, fur=True):
     body.data.materials.append(skin_material())
     body.data.materials.append(plain("Mouth", (0.018, 0.010, 0.045), roughness=0.55))
 
-    inside, density = model.face_regions(body)
-    # Faces in the hollow of the mouth get its dark lining; the rest, skin.
+    body.data.materials.append(plain("Pad", (0.05, 0.08, 0.36), roughness=0.55, subsurface=0.1))
+
+    inside, sole, density = model.surface_regions(body)
+    # Faces in the hollow of the mouth get its dark lining, the soles their
+    # bare pads; the rest, skin.
     me = body.data
     corners = np.empty(len(me.loops), dtype=np.int32)
     me.loops.foreach_get("vertex_index", corners)
     starts = np.empty(len(me.polygons), dtype=np.int32)
     me.polygons.foreach_get("loop_start", starts)
-    depth = np.add.reduceat(inside[corners], starts) / np.diff(np.append(starts, len(corners)))
-    me.polygons.foreach_set("material_index", np.where(depth > 0.5, 2, 1).astype(np.int32))
+    sizes = np.diff(np.append(starts, len(corners)))
+    depth = np.add.reduceat(inside[corners], starts) / sizes
+    pad = np.add.reduceat(sole[corners], starts) / sizes
+    index = np.where(depth > 0.5, 2, np.where(pad > 0.5, 3, 1))
+    me.polygons.foreach_set("material_index", index.astype(np.int32))
     # Weights in steps of 1/64, a call per step rather than per vertex.
     group = body.vertex_groups.new(name="fur")
     steps = np.round(density * 64).astype(np.int32)
     for step in np.unique(steps[steps > 0]):
         group.add(np.nonzero(steps == step)[0].tolist(), step / 64, "REPLACE")
+    # Hair reads only byte colours per face corner from the skin under it, so
+    # the tone is stored that way, scaled to fit under 1.
+    tone = model.surface_tone(body)[corners] / TONE_SCALE
+    attribute = me.color_attributes.new("tone", "BYTE_COLOR", "CORNER")
+    attribute.data.foreach_set("color", np.repeat(tone, 4).astype(np.float32))
     if fur:
         add_fur(body, "fur")
 
@@ -204,3 +234,29 @@ def dress(parts, fur=True):
     parts["mouth"]["TeethLower"].data.materials.append(teeth)
     parts["mouth"]["Tongue"].data.materials.append(plain("Tongue", (0.62, 0.20, 0.26), roughness=0.35,
                                                          subsurface=0.3))
+
+
+def lights(eyes, center=(0, 0, 0.55)):
+    """A soft studio: key from the upper left, fill from the right, a rim
+    from behind that makes the fur's edge glow, and a small light that only
+    the eyes see, for the glint in them."""
+    from mathutils import Vector
+    center = Vector(center)
+
+    def area(name, location, energy, size, color=(1, 1, 1)):
+        data = bpy.data.lights.new(name, "AREA")
+        data.energy, data.size, data.color = energy, size, color
+        obj = bpy.data.objects.new(name, data)
+        bpy.context.scene.collection.objects.link(obj)
+        obj.location = location
+        obj.rotation_euler = (center - Vector(location)).to_track_quat("-Z", "Y").to_euler()
+        return obj
+
+    area("Key", (-2.5, -3.2, 3.2), 380, 3.0, (1.0, 0.97, 0.93))
+    area("Fill", (3.0, -2.5, 1.2), 120, 4.0, (0.92, 0.95, 1.0))
+    area("Rim", (0.8, 3.0, 2.6), 220, 2.0, (0.9, 0.85, 1.0))
+    glint = area("Glint", (1.2, -3.0, 2.0), 60, 0.25)
+    seen_by = bpy.data.collections.new("Eyes")
+    for eye in eyes:
+        seen_by.objects.link(eye)
+    glint.light_linking.receiver_collection = seen_by

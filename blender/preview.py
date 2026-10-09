@@ -26,27 +26,32 @@ POSES = {
     "rest": {},
     # Arms hanging close at the sides, hands by the hips.
     "stand": {
-        "upper_arm.L": (0, deg(4), 0), "forearm.L": (deg(-8), deg(26), 0), "hand.L": (0, 0, deg(-90)),
-        "upper_arm.R": (0, deg(-4), 0), "forearm.R": (deg(-8), deg(-26), 0), "hand.R": (0, 0, deg(90)),
+        "upper_arm.L": (deg(4), deg(14), 0), "forearm.L": (deg(4), deg(20), 0), "hand.L": (0, deg(4), deg(-80)),
+        "upper_arm.R": (deg(4), deg(-14), 0), "forearm.R": (deg(4), deg(-20), 0), "hand.R": (0, deg(-4), deg(80)),
     },
     # His right arm up and out, palm to the front: the wave.
     "hello": {
-        "upper_arm.R": (deg(-10), deg(105), deg(-20)), "forearm.R": (0, deg(12), 0), "hand.R": (0, 0, 0),
-        "upper_arm.L": (0, deg(4), 0), "forearm.L": (deg(-8), deg(26), 0), "hand.L": (0, 0, deg(-90)),
+        "upper_arm.R": (deg(-5), deg(70), deg(-12)), "forearm.R": (0, deg(45), 0), "hand.R": (0, deg(5), 0),
+        "upper_arm.L": (deg(4), deg(14), 0), "forearm.L": (deg(4), deg(20), 0), "hand.L": (0, deg(4), deg(-80)),
     },
     "wave": {
         "upper_arm.R": (0, deg(92), 0), "forearm.R": (0, deg(20), 0),
-        "upper_arm.L": (0, deg(4), 0), "forearm.L": (deg(-8), deg(26), 0), "hand.L": (0, 0, deg(-90)),
+        "upper_arm.L": (deg(4), deg(14), 0), "forearm.L": (deg(4), deg(20), 0), "hand.L": (0, deg(4), deg(-80)),
     },
 }
 
-# Where each camera sits, looking at the middle of the body.
+# Each view: where the camera sits (a direction from what it looks at),
+# what it looks at, and an orthographic width, or None for a long lens.
 VIEWS = {
-    "front": (0, -1, 0),
-    "back": (0, 1, 0),
-    "left": (1, 0, 0),
-    "right": (-1, 0, 0),
-    "three-quarter": (-0.42, -1, 0.08),
+    "front": ((0, -1, 0), (0, 0, 0.53), 1.35),
+    "back": ((0, 1, 0), (0, 0, 0.53), 1.35),
+    "left": ((1, 0, 0), (0, 0, 0.53), 1.35),
+    "right": ((-1, 0, 0), (0, 0, 0.53), 1.35),
+    "three-quarter": ((-0.42, -1, 0.08), (0, 0, 0.53), None),
+    "face": ((0, -1, 0), (0, -0.1, 0.84), 0.66),
+    "face-three-quarter": ((-0.55, -1, 0.06), (0, -0.1, 0.84), 0.70),
+    "feet": ((-0.25, -1, 0.35), (0, -0.05, 0.10), 0.70),
+    "hand": ((-0.3, -1, 0.1), (-0.40, -0.05, 0.90), 0.42),
 }
 CENTER = Vector((0, 0, 0.53))
 SIZE = 640
@@ -83,28 +88,20 @@ def setup_render():
     scene.world = world
 
 
-def light(name, location, energy, size):
-    data = bpy.data.lights.new(name, "AREA")
-    data.energy, data.size = energy, size
-    obj = bpy.data.objects.new(name, data)
-    bpy.context.scene.collection.objects.link(obj)
-    obj.location = location
-    obj.rotation_euler = (CENTER - Vector(location)).to_track_quat("-Z", "Y").to_euler()
-
-
 def camera(view):
     data = bpy.data.cameras.new("Camera")
-    direction = Vector(VIEWS[view]).normalized()
+    direction, center, width = VIEWS[view]
+    direction, center = Vector(direction).normalized(), Vector(center)
     obj = bpy.data.objects.new("Camera", data)
     bpy.context.scene.collection.objects.link(obj)
-    if view == "three-quarter":
+    if width is None:
         data.lens = 85
-        obj.location = CENTER + direction * 3.6
+        obj.location = center + direction * 3.6
     else:
         data.type = "ORTHO"
-        data.ortho_scale = 1.35
-        obj.location = CENTER + direction * 5
-    obj.rotation_euler = (CENTER - obj.location).to_track_quat("-Z", "Y").to_euler()
+        data.ortho_scale = width
+        obj.location = center + direction * 5
+    obj.rotation_euler = (center - obj.location).to_track_quat("-Z", "Y").to_euler()
     bpy.context.scene.camera = obj
     return obj
 
@@ -121,9 +118,7 @@ def build(pose_name, finish):
             obj.data.materials.append(white)
     else:
         look.dress(parts, fur=finish == "fur")
-    light("Key", (-2.5, -3.2, 3.2), 380, 3.0)
-    light("Fill", (3.0, -2.5, 1.2), 120, 4.0)
-    light("Rim", (0.8, 3.0, 2.6), 220, 2.0)
+    look.lights(parts["eyes"])
 
 
 def main():
