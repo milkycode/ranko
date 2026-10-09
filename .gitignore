@@ -1,0 +1,12 @@
+# References, not part of Ranko
+plushie/
+previews/
+
+# Bake output and engine-written types
+build/
+.claude/types/
+.claude-plugin/types/
+
+# Editor and Windows download metadata
+.idea/
+*:Zone.Identifier
