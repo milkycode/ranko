@@ -152,7 +152,8 @@ def hand(side):
     wrist, knuckles = Vector(wrist), Vector(knuckles)
     axis = (knuckles - wrist).normalized()
     outward = axis.cross(Vector((0, 1, 0))).normalized() * side
-    normal = axis.cross(outward)
+    # Out of the palm, on both hands: a mirror of the other hand's.
+    normal = axis.cross(outward) * side
     palm = wrist + axis * 0.055
     digits = []
     # Three fat fingers, the outer one shortest, with room between them.
@@ -164,7 +165,7 @@ def hand(side):
         tip = base + (axis * c + outward * s) * size
         digits.append((name, base, tip, radius, radius + 0.002))
     # The thumb leaves low on the palm's outer edge and leans in front of it.
-    thumb = (axis * 0.45 + outward * 0.85 - normal * 0.25).normalized()
+    thumb = (axis * 0.45 + outward * 0.85 + normal * 0.25).normalized()
     base = palm + outward * 0.058 - axis * 0.024
     digits.append(("thumb", base, base + thumb * 0.068, 0.028, 0.027))
     return Hand(palm, (axis, outward, normal), digits)

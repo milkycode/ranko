@@ -119,6 +119,42 @@ def _sphere_mesh(name, radius):
     return me
 
 
+def rig_from_head(x, dy, dz):
+    """In front of his eyes, in the world: x across, `dy` forward of the
+    eyeballs' centres, `dz` up from them."""
+    c = model.eye_center(1)
+    return model._lifted(tuple(model.HEAD_MATRIX @ Vector((x, c[1] + dy, c[2] + dz))))
+
+
+def _in_hand(name, side):
+    """An empty in the fist of the hand on `side`, as the rest pose has it,
+    at the hollow the curled fingers close round: its X along the fingers,
+    its Y toward the thumb, its Z square to both."""
+    h = model.hand(side)
+    axis, outward, normal = (Vector(v) for v in h.basis)
+    grip = Vector(model._lifted(tuple(h.palm + axis * 0.035 + normal * 0.035)))
+    empty = bpy.data.objects.new(name, None)
+    bpy.context.scene.collection.objects.link(empty)
+    frame = Matrix((axis, outward, axis.cross(outward))).transposed().to_4x4()
+    empty.matrix_world = Matrix.Translation(grip) @ frame
+    return empty
+
+
+def _piece(name, primitive, parent, material, location, rotation=(0, 0, 0), scale=(1, 1, 1), **kwargs):
+    """A primitive placed in a prop's own frame."""
+    primitive(**kwargs)
+    obj = bpy.context.active_object
+    obj.name = name
+    bpy.ops.object.shade_smooth()
+    obj.data.materials.append(material)
+    obj.parent = parent
+    obj.matrix_parent_inverse = Matrix.Identity(4)
+    obj.location = location
+    obj.rotation_euler = rotation
+    obj.scale = scale
+    return obj
+
+
 def _letter(name, text, size, material, parent):
     curve = bpy.data.curves.new(name, "FONT")
     curve.body = text
@@ -201,6 +237,59 @@ def build(parts, rig, to_bone):
         _heart(f"Heart{i + 1}Shape", love, heart)
         to_bone(heart, rig, "root")
         props[f"heart{i + 1}"] = heart
+
+    brass = look.plain("Brass", (0.55, 0.36, 0.12), roughness=0.3)
+    brass.node_tree.nodes["Principled BSDF"].inputs["Metallic"].default_value = 1.0
+    glass = look.plain("Glass", (0.70, 0.85, 1.0), roughness=0.05, coat=1.0)
+    wood = look.plain("Wood", (0.30, 0.14, 0.06), roughness=0.6)
+
+    # A magnifying glass in his right fist: the handle runs across his palm,
+    # the lens stands out past his thumb, facing where his fingers point.
+    mag = _in_hand("Magnifier", -1)
+    _piece("MagHandle", bpy.ops.mesh.primitive_cylinder_add, mag, wood, (0, 0.0, 0),
+           rotation=(deg(90), 0, 0), radius=0.017, depth=0.12)
+    _piece("MagRing", bpy.ops.mesh.primitive_torus_add, mag, brass, (0, 0.135, 0),
+           rotation=(0, deg(90), 0), major_radius=0.07, minor_radius=0.011)
+    _piece("MagLens", bpy.ops.mesh.primitive_cylinder_add, mag, glass, (0, 0.135, 0),
+           rotation=(0, deg(90), 0), radius=0.066, depth=0.006)
+    to_bone(mag, rig, "hand.R")
+    props["magnifier"] = mag
+
+    # A pencil in his right fist, its point out past his little finger, and a
+    # notepad for his lap.
+    yellow = look.plain("Pencil", (0.95, 0.70, 0.10), roughness=0.45)
+    lead = look.plain("Lead", (0.08, 0.08, 0.09), roughness=0.5)
+    pencil = _in_hand("Pencil", -1)
+    _piece("PencilBody", bpy.ops.mesh.primitive_cylinder_add, pencil, yellow, (0, -0.045, 0),
+           rotation=(deg(90), 0, 0), radius=0.014, depth=0.25, vertices=6)
+    _piece("PencilTip", bpy.ops.mesh.primitive_cone_add, pencil, lead, (0, -0.188, 0),
+           rotation=(deg(90), 0, 0), radius1=0.014, depth=0.036, vertices=12)
+    to_bone(pencil, rig, "hand.R")
+    props["pencil"] = pencil
+
+    paper = look.plain("Paper", (0.85, 0.85, 0.80), roughness=0.8)
+    cover = look.plain("Cover", (0.10, 0.20, 0.55), roughness=0.6)
+    notepad = _group("Notepad", (0, -0.36, 0.13))
+    _rounded_box("NotepadPaper", (0.20, 0.26, 0.016), 0.003, paper, notepad)
+    _rounded_box("NotepadCover", (0.20, 0.04, 0.020), 0.004, cover, notepad, (0, -0.12, 0.002))
+    for i in range(4):
+        _rounded_box(f"NotepadLine{i}", (0.15, 0.003, 0.001), 0.0005, cover, notepad, (0, -0.06 + i * 0.04, 0.0085))
+    to_bone(notepad, rig, "root")
+    props["notepad"] = notepad
+
+    # Binoculars up at his eyes.
+    barrel = look.plain("Barrel", (0.12, 0.13, 0.15), roughness=0.5)
+    lens = look.plain("Lens", (0.04, 0.08, 0.16), roughness=0.1, coat=1.0)
+    bino = _group("Binoculars", rig_from_head(0, -0.03, 0.0))
+    for s in (1, -1):
+        x = s * model.EYE_X * model.HEAD_SCALE
+        _piece(f"Barrel{s}", bpy.ops.mesh.primitive_cylinder_add, bino, barrel, (x, -0.10, 0),
+               rotation=(deg(90), 0, 0), radius=0.05, depth=0.20)
+        _piece(f"Lens{s}", bpy.ops.mesh.primitive_cylinder_add, bino, lens, (x, -0.202, 0),
+               rotation=(deg(90), 0, 0), radius=0.042, depth=0.004)
+    _piece("Bridge", bpy.ops.mesh.primitive_cube_add, bino, brass, (0, -0.10, 0), scale=(0.07, 0.10, 0.03), size=1)
+    to_bone(bino, rig, "head")
+    props["binoculars"] = bino
 
     for name, prop in props.items():
         REST[name] = prop.matrix_basis.copy()

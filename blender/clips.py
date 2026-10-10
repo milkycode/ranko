@@ -9,7 +9,7 @@ rest pose.
 import math
 from dataclasses import dataclass
 
-from mathutils import Vector
+from mathutils import Euler, Matrix, Vector
 
 import model
 import rig
@@ -28,6 +28,8 @@ class Clip:
     posture: str = "stand"
     # For a transition, the postures it goes from and to.
     transition: tuple = None
+    # How full of context he is: normal, plump or stuffed.
+    size: str = "normal"
 
 
 CLIPS = {
@@ -45,8 +47,26 @@ CLIPS = {
     "held": Clip("held", 24, True),
     "drop": Clip("drop", 16, False),
     "blush": Clip("blush", 32, False),
+    "fidget-wonder": Clip("wonder", 40, False),
+    "fidget-psst": Clip("psst", 40, False),
+    "fidget-thumbs": Clip("thumbs", 32, False),
+    "fidget-look": Clip("look", 36, False),
+    # While a tool runs: a variant of working for each kind of tool.
+    "working-magnifier": Clip("working_magnifier", 24, True, posture="sit"),
+    "working-notepad": Clip("working_notepad", 24, True, posture="sit"),
+    "working-binoculars": Clip("working_binoculars", 24, True, posture="sit"),
+    # Rounder as the context fills, and a sigh back to size on compaction.
+    "idle-plump": Clip("idle", 48, True, size="plump"),
+    "idle-stuffed": Clip("idle", 48, True, size="stuffed"),
+    "working-plump": Clip("working", 24, True, posture="sit", size="plump"),
+    "working-stuffed": Clip("working", 24, True, posture="sit", size="stuffed"),
+    "deflate": Clip("deflate", 32, False),
 }
-PROPS = ("sweat", "laptop", "cushion", "z1", "z2", "z3", "heart1", "heart2", "heart3")
+PROPS = ("sweat", "laptop", "cushion", "z1", "z2", "z3", "heart1", "heart2", "heart3",
+         "magnifier", "pencil", "notepad", "binoculars")
+
+# How much bigger his belly is, plump and stuffed: wider, deeper, a little taller.
+SIZES = {"normal": (1.0, 1.0, 1.0), "plump": (1.10, 1.22, 1.06), "stuffed": (1.20, 1.42, 1.12)}
 
 # Arms hanging loose at his sides: out just enough to clear the belly, the
 # elbows a little bent so the forearms follow its curve, palms in.
@@ -89,6 +109,20 @@ class Pose(dict):
                 self[key] = tuple(lerp(o, v, amount) for o, v in zip(old, value))
             else:
                 self[key] = lerp(self.get(key, 0), value, amount)
+
+    def lid(self, side, shut, lower=0.0):
+        """One eye's lids, from open (0) to shut (1): a wink."""
+        self[f"lid.{side}"] = (rig.SHUT["upper"] * shut, 0, 0)
+        self[f"lid_low.{side}"] = (rig.SHUT["lower"] * lower, 0, 0)
+
+    def hand_shape(self, side, shape, amount=1.0):
+        """A fist, a pointing index finger, or a thumb up, `amount` of the way
+        from how the hand is."""
+        curls = {"fist": (95, 95, 95, 40), "point": (0, 100, 100, 50), "thumb": (100, 100, 100, -10)}[shape]
+        for finger, curl in zip(("index", "middle", "ring", "thumb"), curls):
+            key = f"{finger}.{side}@curl"
+            self[key] = lerp(self.get(key, 0), curl, amount)
+            self[f"{finger}.{side}@spread"] = lerp(self.get(f"{finger}.{side}@spread", 0), 0, amount)
 
     def lids(self, shut, lower=None):
         """The lids of both eyes, from open (0) to shut (1); the lower lids
@@ -151,6 +185,26 @@ def reach(p, side, wrist, pole, amount=1.0):
     for bone, turn in ((f"upper_arm.{side}", upper_turn), (f"forearm.{side}", fore_turn)):
         old = p.get(bone, (0, 0, 0))
         p[bone] = tuple(lerp(o, n, amount) for o, n in zip(old, _euler(turn)))
+
+
+def orient_hand(p, side, along, thumb, amount=1.0):
+    """Turns the hand on `side` so its fingers point `along` and its thumb
+    side faces `thumb`, both in the world, whatever the arm above it does;
+    with `amount` under 1, only that far from how it was."""
+    h = model.hand(1 if side == "L" else -1)
+    axis, outward = h.basis[0], h.basis[1]
+    rest = Matrix((axis, outward, axis.cross(outward))).transposed()
+    along = Vector(along).normalized()
+    thumb = Vector(thumb)
+    thumb = (thumb - along * thumb.dot(along)).normalized()
+    want = Matrix((along, thumb, along.cross(thumb))).transposed()
+    arm = Matrix.Identity(3)
+    for bone in (f"upper_arm.{side}", f"forearm.{side}"):
+        arm = arm @ Euler(tuple(map(deg, p.get(bone, (0, 0, 0)))), "XYZ").to_matrix()
+    turn = _euler((arm.inverted() @ want @ rest.transposed()).to_quaternion())
+    old = p.get(f"hand.{side}", (0, 0, 0))
+    p[f"hand.{side}"] = tuple(lerp(o, n, amount) for o, n in zip(old, turn))
+    p[f"hand.{side}@twist"] = lerp(p.get(f"hand.{side}@twist", 0), 0, amount)
 
 
 def sit(p, drop=SIT_DROP):
@@ -543,6 +597,185 @@ def blush(t, frame):
     return p
 
 
+def _gesture(t, start=0.15, end=0.82):
+    """How far into a gesture a fidget is: in by `start`, out from `end`."""
+    return ease(t / start) * (1 - ease((t - end) / (1 - end)))
+
+
+def wonder(t, frame):
+    """Puzzled: scratches his head with his right hand, looking up, one brow
+    raised, mouth a little open and askew."""
+    g = _gesture(t)
+    p = Pose(ARMS_DOWN)
+    p.relax_hands()
+    scratch = 0.012 * math.sin(2 * math.pi * 5 * t) * g
+    reach(p, "R", (-0.26, 0.0, 1.0 + scratch), pole=(1, 0.5, -0.2), amount=g)
+    p["hand.R@twist"] = lerp(p["hand.R@twist"], -30, g)
+    p.hand_shape("R", "fist", 0.5 * g)
+    reach(p, "L", (0.09, -0.27, 0.43), pole=(1, 0.2, -0.6), amount=g)
+    p.turn("head", y=-8 * g, x=-5 * g)
+    p.turn("brow.R", y=-10 * g)
+    p["brow.R@offset"] = (0, 0, 0.016 * g)
+    for side in "LR":
+        p.turn(f"eye.{side}", x=-14 * g, z=10 * g)
+    p["@mouth"] = lerp(0.13, 0.3, g)
+    p.turn("jaw", x=3 * g, z=3 * g)
+    return p
+
+
+def psst(t, frame):
+    """Up to something: a finger to his lips, the other hand on his hip, a
+    sly look sideways at you under lowered brows."""
+    g = _gesture(t)
+    p = Pose(ARMS_DOWN)
+    p.relax_hands()
+    # His arms are short: the wrist goes as far toward his lips as it can, and
+    # the finger points the rest of the way, up across them.
+    lips = Vector(rig.from_head((-0.02, model.front(-0.02, 0.79), 0.79)))
+    shoulder = Vector(model._lifted(model._mirror(model.SHOULDER)))
+    wrist = shoulder + (lips - shoulder).normalized() * 0.255 + Vector((0, 0, -0.03))
+    reach(p, "R", tuple(wrist), pole=(1, 0.1, -1), amount=g)
+    orient_hand(p, "R", along=lips + Vector((0, 0, 0.05)) - wrist, thumb=(0.4, 1, 0), amount=g)
+    p.hand_shape("R", "point", g)
+    p.turn("chest", z=-6 * g)
+    reach(p, "L", (0.36, 0.03, 0.43), pole=(1, 0.8, 0.1), amount=g)
+    p.hand_shape("L", "fist", 0.6 * g)
+    p.turn("root", z=-6 * g)
+    p.turn("head", x=4 * g, y=-4 * g)
+    for side, s in (("L", 1), ("R", -1)):
+        p.turn(f"brow.{side}", y=-12 * s * g)
+        p[f"brow.{side}@offset"] = (0, 0, -0.006 * g)
+    p.lids(0.35 * g, lower=0.15 * g)
+    look_at_viewer(p, 1 + 0.6 * g)
+    p["@mouth"] = lerp(0.13, 0.05, g)
+    return p
+
+
+def thumbs(t, frame):
+    """Pleased with himself: a thumb up at you, a wink and a smug smile, his
+    other hand on his belly."""
+    g = _gesture(t, 0.2, 0.8)
+    p = Pose(ARMS_DOWN)
+    p.relax_hands()
+    reach(p, "R", (-0.34, -0.30, 0.57), pole=(0, 0.5, -1), amount=g)
+    # Knuckles to the camera off to his right, the thumb straight up.
+    orient_hand(p, "R", along=(-0.45, -1, 0.1), thumb=(0, 0, 1), amount=g)
+    p.hand_shape("R", "thumb", g)
+    reach(p, "L", (0.09, -0.27, 0.43), pole=(1, 0.2, -0.6), amount=g)
+    wink = ease((t - 0.35) / 0.08) * (1 - ease((t - 0.6) / 0.08))
+    p.lid("R", 0.25 * g + 0.75 * wink, lower=0.3 * g + 0.3 * wink)
+    p.lid("L", 0.25 * g, lower=0.3 * g)
+    p.turn("head", y=-5 * g)
+    p["@mouth"] = lerp(0.13, 0.35, g)
+    p["@offset"] = (0, 0, 0.02 * math.sin(math.pi * min(1, t / 0.25)))
+    look_at_viewer(p)
+    return p
+
+
+def look(t, frame):
+    """Looks around: turns his head and eyes to his left, holds, across to
+    his right, holds, and back."""
+    keys = [(0.0, 0.0), (0.15, -1.0), (0.38, -1.0), (0.6, 1.0), (0.82, 1.0), (1.0, 0.0)]
+    side = 0.0
+    for (t0, a), (t1, b) in zip(keys, keys[1:]):
+        if t0 <= t < t1:
+            side = lerp(a, b, ease((t - t0) / (t1 - t0)))
+            break
+    p = Pose(ARMS_DOWN)
+    p.relax_hands()
+    p.turn("head", z=-22 * side, x=-3 * abs(side))
+    p.turn("root", z=-5 * side)
+    for eye in "LR":
+        p.turn(f"eye.{eye}", z=-18 * side)
+    p.lids(blink(frame, 15))
+    p["@mouth"] = 0.13
+    return p
+
+
+def working_magnifier(t, frame):
+    """At his laptop, peering at the screen through a magnifying glass held up
+    in his right fist, his left hand still on the keys."""
+    p = working(t, frame)
+    for finger in ("index", "middle", "ring", "thumb"):
+        p.pop(f"{finger}.R@spread", None)
+    bob = 0.01 * math.sin(2 * math.pi * t)
+    reach(p, "R", (-0.12, -0.36, 0.62 + bob), pole=(1, 0.4, -0.7))
+    orient_hand(p, "R", along=(0.15, -1, 0.15), thumb=(0.45, 0, 1))
+    p.hand_shape("R", "fist")
+    p["magnifier@show"] = True
+    p.turn("head", y=-4)
+    for side in "LR":
+        p.turn(f"eye.{side}", z=8)
+    p["@mouth"] = 0.25
+    for side in "LR":
+        p[f"brow.{side}@offset"] = (0, 0, 0.008)
+    return p
+
+
+def working_notepad(t, frame):
+    """Writing on a notepad on his lap instead of typing, the pencil going in
+    little loops."""
+    p = working(t, frame)
+    p["laptop@show"] = False
+    p["notepad@show"] = True
+    p["notepad@offset"] = (LAPTOP[0], LAPTOP[1] + 0.03, LAPTOP[2] + 0.06)
+    p["pencil@show"] = True
+    for finger in ("index", "middle", "ring", "thumb"):
+        p.pop(f"{finger}.R@spread", None)
+    loop = (0.03 * math.sin(4 * math.pi * t), 0, 0.012 * math.cos(4 * math.pi * t))
+    reach(p, "R", (-0.04 + loop[0], -0.40, 0.42 + loop[2]), pole=(1, 0.5, -0.4))
+    orient_hand(p, "R", along=(0.6, -1, 0.1), thumb=(0.1, 0.2, 1))
+    p.hand_shape("R", "fist")
+    reach(p, "L", (0.12, -0.36, 0.33), pole=(1, 0.3, -0.5))
+    for side in "LR":
+        p.turn(f"eye.{side}", x=16)
+    p["@mouth"] = 0.15
+    return p
+
+
+def working_binoculars(t, frame):
+    """Holds binoculars to his eyes with both hands, scanning slowly side to
+    side: looking something up on the web."""
+    p = working(t, frame)
+    p["laptop@show"] = False
+    p["binoculars@show"] = True
+    scan = math.sin(2 * math.pi * t)
+    p.turn("head", z=-10 * scan, x=-6)
+    for side, s in (("L", 1), ("R", -1)):
+        p.pop(f"index.{side}@spread", None)
+        reach(p, side, (s * 0.20, -0.32, 0.68), pole=(1, 0.4, -0.8))
+        orient_hand(p, side, along=(-s * 0.4, -0.3, 1), thumb=(0, -1, 0.2))
+        p.hand_shape(side, "fist", 0.7)
+    p["@mouth"] = 0.2
+    return p
+
+
+def deflate(t, frame):
+    """From stuffed back to his own size, with a big sigh: a breath in, then
+    all of it out, eyes shut, arms sagging, and a shake back to normal."""
+    p = idle(0, 0)
+    if t < 0.25:
+        u = ease(t / 0.25)
+        size, mouth, shut, sag = 1.0, lerp(0.13, 0.05, u), 0.3 * u, 0.0
+        p["hips@scale"] = (1, 1, 1 + 0.04 * u)
+    elif t < 0.75:
+        u = ease((t - 0.25) / 0.5)
+        size, mouth, shut, sag = 1 - u, lerp(0.05, 0.55, math.sin(math.pi * min(1.0, u * 1.2))), 0.9, u
+        p["hips@scale"] = (1, 1, 1 + 0.04 * (1 - u) - 0.06 * u)
+    else:
+        u = ease((t - 0.75) / 0.25)
+        size, mouth, shut, sag = 0.0, lerp(0.15, 0.13, u), 0.9 * (1 - u), 1 - u
+        p["hips@scale"] = (1, 1, 1 - 0.06 * (1 - u) + 0.02 * math.sin(3 * math.pi * u) * (1 - u))
+    stuffed = SIZES["stuffed"]
+    grown(p, tuple(lerp(1, f, size) for f in stuffed))
+    p.turn("upper_arm.L", y=10 * sag)
+    p.turn("upper_arm.R", y=-10 * sag)
+    p.turn("head", x=6 * sag)
+    p["@mouth"] = mouth
+    p.lids(shut, lower=0.3 * shut)
+    return p
+
+
 # Where the laptop sits on his lap, as an offset from where it is built, and
 # where its keys are then, in the world.
 LAPTOP = (0, -0.06, 0.27)
@@ -551,10 +784,28 @@ CUSHION = 0.13  # its height
 
 MOTIONS = {"idle": idle, "hello": hello, "working": working, "happy": happy, "oops": oops, "sleepy": sleepy,
            "sit_down": sit_down, "stand_up": stand_up, "doze_off": doze_off, "wake_up": wake_up,
-           "pat": pat, "held": held, "drop": drop, "blush": blush}
+           "pat": pat, "held": held, "drop": drop, "blush": blush,
+           "wonder": wonder, "psst": psst, "thumbs": thumbs, "look": look,
+           "working_magnifier": working_magnifier, "working_notepad": working_notepad,
+           "working_binoculars": working_binoculars, "deflate": deflate}
+
+
+def grown(p, size):
+    """The pose with his belly `size` (a SIZES entry or factors) and his arms
+    out a little further to clear it."""
+    factors = SIZES[size] if isinstance(size, str) else size
+    sx, sy, sz = p.get("hips@scale", (1, 1, 1))
+    p["hips@scale"] = (sx * factors[0], sy * factors[1], sz * factors[2])
+    out = (factors[0] - 1) * 120
+    p.turn("upper_arm.L", y=out)
+    p.turn("upper_arm.R", y=-out)
+    return p
 
 
 def pose_at(clip_name, frame):
     """Ranko's pose on `frame` of a clip, in rig.pose's terms."""
     clip = CLIPS[clip_name]
-    return MOTIONS[clip.motion](frame / clip.frames, frame).for_rig()
+    p = MOTIONS[clip.motion](frame / clip.frames, frame)
+    if clip.size != "normal":
+        p = grown(p, clip.size)
+    return p.for_rig()

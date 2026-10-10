@@ -24,7 +24,7 @@
     "toolProps": {
       "type": "boolean",
       "title": "Tool props",
-      "description": "Ranko holds a prop for the tool Claude is using: a magnifier to read or search, knitting needles to edit, a keyboard for the shell, binoculars for the web.",
+      "description": "Ranko holds a prop for the tool Claude is using: a magnifier to read or search, a notepad and pencil to edit, binoculars for the web; otherwise he types on his laptop.",
       "required": false,
       "default": true
     },
@@ -52,7 +52,7 @@
     "fidgets": {
       "type": "boolean",
       "title": "Idle fidgets",
-      "description": "Left alone, Ranko now and then looks around, wonders, gives a thumbs up or hops.",
+      "description": "Left alone, Ranko now and then scratches his head, says psst, gives a thumbs up or looks around.",
       "required": false,
       "default": true
     },

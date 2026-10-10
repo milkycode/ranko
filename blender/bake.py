@@ -101,6 +101,12 @@ def set_layer(parts, layer):
     parts["floor"].hide_render = layer != "shadow"
     for obj in parts["toy"]:
         obj.visible_camera = layer == "plush"
+        # The fur adds a centimetre to the shadow's edge, which the floor's
+        # soft light blurs away, and costs as much to grow as the frame does
+        # to render: the shadow is cast without it.
+        for mod in obj.modifiers:
+            if mod.type == "PARTICLE_SYSTEM":
+                mod.show_render = layer == "plush"
     bpy.context.scene.cycles.samples = LAYERS[layer]
 
 

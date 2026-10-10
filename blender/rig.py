@@ -303,7 +303,8 @@ def digit_axis(bone, what):
     along = (Vector(tip) - Vector(base)).normalized()
     out_of_palm = h.basis[2]
     if what == "spread":
-        return out_of_palm
+        # Mirrored with the hand, so a spread swings toward the thumb on both.
+        return out_of_palm * (1 if side == "L" else -1)
     return along.cross(out_of_palm).normalized()
 
 

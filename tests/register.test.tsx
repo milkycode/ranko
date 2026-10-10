@@ -12,8 +12,7 @@ const CLIPS: Record<string, [number, boolean]> = {
   'idle-stuffed': [48, true],
   working: [24, true],
   'working-magnifier': [24, true],
-  'working-needles': [24, true],
-  'working-keyboard': [24, true],
+  'working-notepad': [24, true],
   'working-binoculars': [24, true],
   'working-plump': [24, true],
   'working-stuffed': [24, true],
@@ -25,10 +24,10 @@ const CLIPS: Record<string, [number, boolean]> = {
   deflate: [24, false],
   blush: [32, false],
   pat: [28, false],
+  'fidget-wonder': [40, false],
+  'fidget-psst': [40, false],
+  'fidget-thumbs': [32, false],
   'fidget-look': [36, false],
-  'fidget-scratch': [32, false],
-  'fidget-yawn': [40, false],
-  'fidget-hop': [20, false],
 }
 
 const MANIFEST = JSON.stringify({
@@ -306,7 +305,7 @@ describe('register', () => {
       const clock = answerTheWorld(on)
       let finish = () => {}
       on('tool.call', ($, e) =>
-        e.tool === 'Bash'
+        e.tool === 'WebFetch'
           ? new Promise(resolve => {
               finish = () => resolve({ result: 'ok', text: 'ok' })
             })
@@ -322,11 +321,11 @@ describe('register', () => {
       await clock.advance(1600)
       expect(await shownClip(band)).toBe('working')
 
-      // A long shell command holds the keyboard for as long as it runs.
-      const call = $.tool.call({ tool: 'Bash', command: 'sleep 9' })
+      // A slow fetch holds the binoculars for as long as it runs.
+      const call = $.tool.call({ tool: 'WebFetch', url: 'https://example.com', prompt: 'read it' } as never)
       await clock.settle()
       await clock.advance(5000)
-      expect(await shownClip(band)).toBe(isOn ? 'working-keyboard' : 'working')
+      expect(await shownClip(band)).toBe(isOn ? 'working-binoculars' : 'working')
       finish()
       await call
       await clock.advance(100)

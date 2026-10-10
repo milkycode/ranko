@@ -46,17 +46,17 @@ export function isManifest(value: unknown): value is Manifest {
   })
 }
 
-export type Prop = 'magnifier' | 'needles' | 'keyboard' | 'binoculars'
+export type Prop = 'magnifier' | 'notepad' | 'binoculars'
 export type Size = 'normal' | 'plump' | 'stuffed'
 
+// The shell, and anything else, is his laptop: plain working.
 export const PROP_FOR_TOOL: Record<string, Prop> = {
   Read: 'magnifier',
   Grep: 'magnifier',
   Glob: 'magnifier',
-  Edit: 'needles',
-  Write: 'needles',
-  NotebookEdit: 'needles',
-  Bash: 'keyboard',
+  Edit: 'notepad',
+  Write: 'notepad',
+  NotebookEdit: 'notepad',
   WebFetch: 'binoculars',
   WebSearch: 'binoculars',
 }
