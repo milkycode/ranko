@@ -29,8 +29,22 @@ ARMS_DOWN = {
     "upper_arm.L": (deg(4), deg(35), 0), "forearm.L": (deg(-10), deg(-6), 0), "hand.L": (0, deg(4), deg(-80)),
     "upper_arm.R": (deg(4), deg(-35), 0), "forearm.R": (deg(-10), deg(6), 0), "hand.R": (0, deg(-4), deg(80)),
 }
+def _arms(upper, fore, twist=80, curl=30):
+    """Both arms hanging, in degrees for his left (mirrored for his right):
+    the upper arm's and forearm's turns, the hand's twist, the fingers' curl."""
+    p = clips.Pose({"upper_arm.L": upper, "forearm.L": fore, "hand.L@twist": twist,
+                    "upper_arm.R": (upper[0], -upper[1], -upper[2]), "forearm.R": (fore[0], -fore[1], -fore[2]),
+                    "hand.R@twist": -twist, "@mouth": 0.0})
+    p.relax_hands(curl=curl)
+    return p.for_rig()
+
+
 POSES = {
     "rest": {},
+    # Candidates for arms hanging at rest.
+    "armsA": _arms((-6, 32, 0), (-18, 14, 0)),
+    "armsB": _arms((-12, 30, 0), (-28, 20, 0), twist=70, curl=40),
+    "mouth0": {"@mouth": 0.0}, "mouth5": {"@mouth": 0.5},
     # Arms hanging at the sides, hands by the hips.
     "stand": ARMS_DOWN,
     # His right arm up and out, palm to the front: the wave.

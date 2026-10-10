@@ -27,10 +27,11 @@ CLIPS = {
     "hello": Clip("hello", 56, False),
 }
 
-# Arms hanging at his sides, hands by his hips, palms in.
+# Arms hanging loose at his sides: out just enough to clear the belly, the
+# elbows a little bent so the forearms follow its curve, palms in.
 ARMS_DOWN = {
-    "upper_arm.L": (4, 35, 0), "forearm.L": (-10, -6, 0), "hand.L@twist": 80,
-    "upper_arm.R": (4, -35, 0), "forearm.R": (-10, 6, 0), "hand.R@twist": -80,
+    "upper_arm.L": (-8, 34, 0), "forearm.L": (-14, 18, 0), "hand.L@twist": 85,
+    "upper_arm.R": (-8, -34, 0), "forearm.R": (-14, -18, 0), "hand.R@twist": -85,
 }
 # His right arm up and out, forearm raised, palm to the front.
 WAVE_ARM = {"upper_arm.R": (-5, 65, -12), "forearm.R": (0, 45, 0), "hand.R": (0, 5, 0), "hand.R@twist": 0}
@@ -69,7 +70,7 @@ class Pose(dict):
             self[f"lid.{side}"] = (rig.SHUT["upper"] * shut, 0, 0)
             self[f"lid_low.{side}"] = (rig.SHUT["lower"] * lower, 0, 0)
 
-    def relax_hands(self, curl=28, together=10):
+    def relax_hands(self, curl=35, together=10):
         """Fingers drawn together and curled a little, as hands hang at rest."""
         for side in "LR":
             for finger, spread in (("index", -together), ("middle", 0), ("ring", together)):
@@ -116,13 +117,16 @@ def idle(t, frame):
     for i in range(1, 5):
         p.turn(f"tail.{i}", z=7 * math.sin(2 * math.pi * t - 0.7 * i))
     p.lids(blink(frame, 30))
+    # A smile, the lips parting a little with each breath.
+    p["@mouth"] = 0.10 + 0.06 * (0.5 + 0.5 * wave)
     look_at_viewer(p)
     return p
 
 
 def hello(t, frame):
-    """Raises his right arm, waves two and a half times with a big grin and
-    raised brows, and lowers it again."""
+    """Raises his right arm and opens his mouth in a big grin, waves two and
+    a half times with raised brows, and lowers it again, the grin settling
+    back into a smile."""
     up = ease(t / 0.18) if t < 0.18 else (1 - ease((t - 0.84) / 0.16) if t > 0.84 else 1.0)
     p = Pose(ARMS_DOWN)
     p.relax_hands()
@@ -135,10 +139,11 @@ def hello(t, frame):
     swing = math.sin(2 * math.pi * 2.5 * waving) * up
     p.turn("forearm.R", y=22 * swing)
     p.turn("hand.R", y=12 * swing)
-    # A little bounce as the arm goes up, a tilt of the head, a wider grin.
+    # A little bounce as the arm goes up, a tilt of the head, the grin.
     p["@offset"] = (0, 0, 0.025 * math.sin(math.pi * min(1.0, t / 0.18)))
     p.turn("head", y=5 * up, x=-3 * up)
-    p.turn("jaw", x=6 * up)
+    grin = ease((t - 0.10) / 0.16) if t < 0.62 else 1 - ease((t - 0.62) / 0.30)
+    p["@mouth"] = lerp(0.12, 1.0, grin)
     for side in "LR":
         p[f"brow.{side}@offset"] = (0, 0, 0.010 * up)
     for i in range(1, 5):

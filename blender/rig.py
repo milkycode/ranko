@@ -11,7 +11,8 @@ of the rest pose, applied on top of its parent's (as model.pose_matrices
 reads it); `<bone>@twist` turns a bone about its own length first;
 `<digit>@curl` and `<digit>@spread` bend a finger at its knuckle and swing
 it across the hand; `@offset` moves the whole of him, `<bone>@offset` one
-bone; `<bone>@scale` stretches a bone along the world's axes.
+bone; `<bone>@scale` stretches a bone along the world's axes; `@mouth` opens
+the mouth from shut (0) to the sculpted grin (1).
 """
 
 import math
@@ -196,6 +197,71 @@ def thicken(lid):
     thick.material_offset_rim = 1
 
 
+def mouth_gap(x):
+    """How far the lower lip sits below the upper one at x, as sculpted, in
+    the head's own frame: nothing past the corners."""
+    return np.clip(model.upper_lip(x) - model.lower_lip(x, 1.0) - 0.002, 0, None)
+
+
+def closing(p):
+    """How far each point of the head's own frame rises when the mouth
+    shuts: the lower lip all the way to the upper one, the floor of the mouth
+    with it, the chin under it less and less, down to the neck."""
+    x, y, z = p
+    lip = model.lower_lip(x, 1.0)
+    below = _smooth((model.upper_lip(x) - 0.004 - z) / 0.012)
+    fade = _smooth((z - 0.58) / np.maximum(lip - 0.01 - 0.58, 1e-3))
+    front = _smooth((model.front(0, 0.72) + 0.17 - y) / 0.06)
+    return mouth_gap(x) * below * fade * front
+
+
+def smile(p):
+    """How far each point of the head's own frame moves up to bend a shut
+    mouth's line into a smile: the corners up, the middle a little down,
+    fading out a few centimetres above and below the line and past the
+    corners."""
+    x, y, z = p
+    w = model.MOUTH_HALF_WIDTH
+    across = np.minimum(np.abs(x) / w, 1.15)
+    bend = 0.028 * across ** 2 - 0.006
+    near = _smooth(1 - np.abs(z - model.upper_lip(x)) / 0.055)
+    front = _smooth((model.front(0, 0.72) + 0.17 - y) / 0.06)
+    inside = 1 - _smooth((np.abs(x) - w - 0.02) / 0.05)
+    return bend * near * front * inside
+
+
+def _shape_key(obj, name, co):
+    if obj.data.shape_keys is None:
+        obj.shape_key_add(name="Basis", from_mix=False)
+    key = obj.shape_key_add(name=name, from_mix=False)
+    key.data.foreach_set("co", co.astype(np.float32).ravel())
+
+
+def _coords(obj):
+    co = np.empty(len(obj.data.vertices) * 3, dtype=np.float32)
+    obj.data.vertices.foreach_get("co", co)
+    return co.reshape(-1, 3)
+
+
+def add_mouth_keys(parts):
+    """A `closed` shape key on everything the mouth is made of: the skin as
+    `closing` lifts it and `smile` bends it, the lower teeth and tongue risen with the jaw but
+    kept inside, the upper teeth tucked a little up and in. The teeth and
+    tongue are meshes in the head's own frame."""
+    body = parts["body"]
+    co = _coords(body)
+    head = model.head_space(model.body_space(tuple(co.T)))
+    lift = (closing(head) + smile(head)) * model.HEAD_SCALE
+    _shape_key(body, "closed", co + np.stack([0 * lift, 0 * lift, lift], 1))
+    for name, back, keep_in in (("TeethLower", 0.02, 0.03), ("Tongue", 0.02, 0.06)):
+        obj = parts["mouth"][name]
+        co = _coords(obj)
+        rise = np.clip(mouth_gap(co[:, 0]) - keep_in, 0, None)
+        _shape_key(obj, "closed", co + np.stack([0 * rise, 0 * rise + back, rise], 1))
+    obj = parts["mouth"]["TeethUpper"]
+    _shape_key(obj, "closed", _coords(obj) + np.array([0, 0.015, 0.008], dtype=np.float32))
+
+
 def build(finish="fur", draft=False, strands=None):
     """Ranko in the rest pose, rigged and dressed: `finish` is `clay`,
     `look` (materials, no fur), `draft` (thin fur) or `fur`; `strands`
@@ -203,6 +269,7 @@ def build(finish="fur", draft=False, strands=None):
     model.clear_scene()
     parts = {"body": model.build_body({}), "eyes": model.build_eyes({}), "mouth": model.build_mouth({}),
              "lids": [build_lid(side, which) for which in ("upper", "lower") for side in "LR"]}
+    add_mouth_keys(parts)
     rig = build_armature(all_bones())
     assign(parts["body"], rig, weights(parts["body"]))
     for eye, side in zip(parts["eyes"], "LR"):
@@ -266,7 +333,7 @@ def pose(parts, values):
             bone, what = "root", key[1:]
         b = rig.data.bones[bone]
         turn = b.matrix_local.to_3x3()
-        if what in ("", "curl", "spread", "twist"):
+        if what in ("", "curl", "spread", "twist", "mouth"):
             continue
         elif what == "offset":
             rig.pose.bones[bone].location = turn.inverted() @ Vector(value)
@@ -275,6 +342,10 @@ def pose(parts, values):
             rig.pose.bones[bone].scale = (abs(local[0][0]), abs(local[1][1]), abs(local[2][2]))
         else:
             raise ValueError(f"unknown pose key {key}")
+    # How far open the mouth is: 1 the grin as sculpted, 0 shut in a smile.
+    shut = min(1.0, max(0.0, 1.0 - values.get("@mouth", 1.0)))
+    for obj in (parts["body"], *parts["mouth"].values()):
+        obj.data.shape_keys.key_blocks["closed"].value = shut
     # A lid wide open lies inside the head and is left out of the picture, so
     # none of its fur can show through.
     for lid, bone in zip(parts.get("lids", []), ("lid.L", "lid.R", "lid_low.L", "lid_low.R")):
