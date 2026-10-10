@@ -227,8 +227,8 @@ BONES = _bones()
 # the head, the grin right under them, a big round chin under that.
 EYE_RADIUS = 0.077
 EYE_X, EYE_Z = 0.094, 0.912
-MOUTH_HALF_WIDTH = 0.222
-UPPER_LIP_Z, UPPER_LIP_CURVE = 0.802, 0.55
+MOUTH_HALF_WIDTH = 0.228
+UPPER_LIP_Z, UPPER_LIP_CURVE = 0.800, 0.85
 
 
 # The head is sculpted at the size of the close-ups it was measured from and
@@ -246,14 +246,17 @@ def head_space(p):
 
 def _head_shape(p):
     """The head before any carving: a big ball, a little taller than wide,
-    widest at the cheeks and drawn in again toward the chin, cheeks puffed
-    up beside the mouth, a pad over the upper lip and a big round chin under
-    it."""
+    widest at the cheeks and drawn in again toward the chin, the muzzle
+    rounding forward, cheeks puffed up beside the mouth, a pad over the upper
+    lip and a big round chin under it."""
     h = ellipsoid(p, (0, -0.005, 0.834), (0.276, 0.252, 0.264))
     h = smin(h, ellipsoid(p, (0, -0.045, 0.730), (0.248, 0.212, 0.130)), 0.10)
     for s in (1, -1):
         h = smin(h, ellipsoid(p, (s * 0.172, -0.172, 0.822), (0.082, 0.072, 0.066)), 0.05)
-    h = smin(h, ellipsoid(p, (0, -0.212, 0.848), (0.118, 0.052, 0.042)), 0.04)
+    # A muzzle: the lower face rounds forward, nearly as far as the eyes,
+    # and carries the mouth.
+    h = smin(h, ellipsoid(p, (0, -0.165, 0.770), (0.205, 0.125, 0.115)), 0.08)
+    h = smin(h, ellipsoid(p, (0, -0.215, 0.848), (0.118, 0.055, 0.044)), 0.04)
     return smin(h, ellipsoid(p, (0, -0.165, 0.682), (0.212, 0.118, 0.092)), 0.06)
 
 
@@ -318,7 +321,7 @@ def face_features():
     return features
 
 
-MOUTH_DEPTH = 0.094  # at the middle, wide open
+MOUTH_DEPTH = 0.104  # at the middle, wide open
 
 
 def upper_lip(x):
@@ -326,11 +329,17 @@ def upper_lip(x):
 
 
 def lower_lip(x, open_=1.0):
-    """The lower lip's edge: a deep round curve that meets the upper lip at
-    the corners, so the grin is a half moon; `open_` 0 shuts it to a line."""
+    """The lower lip's edge: half an ellipse under the smiling upper lip, so
+    the grin is a broad smile with round, raised ends; `open_` 0 shuts it to
+    a line."""
     w = MOUTH_HALF_WIDTH
     middle = UPPER_LIP_Z - MOUTH_DEPTH * open_ - 0.004
-    return middle + (upper_lip(w) - middle) * abs(x / w) ** 2.0
+    # Past the corners it climbs away steeply, so nothing is cut there.
+    if np.isscalar(x):
+        return middle + (upper_lip(w) - middle) * (1 - math.sqrt(max(0.0, 1 - (x / w) ** 2))) \
+            + 10 * max(0.0, abs(x) - w)
+    return middle + (upper_lip(w) - middle) * (1 - np.sqrt(np.clip(1 - (x / w) ** 2, 0, 1))) \
+        + 10 * np.maximum(0, np.abs(x) - w)
 
 
 MOUTH_CAVITY = 0.09  # how deep under the skin the mouth reaches
@@ -342,7 +351,7 @@ def _mouth(p, open_=1.0):
     round to its corners."""
     x, y, z = p
     # The lips meet in rounded corners, not points.
-    between = smax(z - upper_lip(x), lower_lip(x, open_) - z, 0.014)
+    between = smax(z - upper_lip(x), lower_lip(x, open_) - z, 0.022)
     under_skin = np.maximum(-_head_shape(p) - MOUTH_CAVITY, y + 0.02)
     return np.maximum(between, under_skin)
 
@@ -582,9 +591,9 @@ def _joined(name, objects):
 
 
 def build_mouth(pose=None, open_=1.0):
-    """Upper teeth hanging half hidden under the upper lip, small pointed
-    ones at the ends; broader lower teeth packed along the lower lip, a
-    canine at each end; a big tongue on the floor of the hollow. No two
+    """Upper teeth hanging half hidden under the upper lip, smaller and a
+    little pointed toward the ends; a close row of broad round lower teeth
+    along the lower lip; a big tongue on the floor of the hollow. No two
     teeth quite alike, as in a real mouth."""
     m = pose_matrices(pose or {})["head"]
     rng = np.random.default_rng(11)
@@ -599,22 +608,20 @@ def build_mouth(pose=None, open_=1.0):
         return centres
 
     upper = []
-    halves = [0.011, 0.016, 0.019, 0.020, 0.020, 0.019, 0.016, 0.011]
-    for i, (x, half) in enumerate(zip(row(halves, 0.007), halves)):
+    halves = [0.017, 0.022, 0.024, 0.025, 0.024, 0.022, 0.017]
+    for i, (x, half) in enumerate(zip(row(halves, 0.005), halves)):
         lip = upper_lip(x)
-        tall = 0.010 + 0.35 * half
+        tall = 0.012 + 0.50 * half
         jitter = 1 + rng.uniform(-0.06, 0.06)
         upper.append(_tooth(f"Upper{i}", (x, front(x, lip) + 0.034, lip + 0.002), (half, 0.011, tall * jitter), 1,
-                            -2.4 * x + rng.uniform(-0.05, 0.05), taper=0.65 if half < 0.013 else 0.30))
+                            -2.4 * x + rng.uniform(-0.05, 0.05), taper=0.50 if half < 0.018 else 0.30))
     lower = []
-    halves = [0.017, 0.019, 0.019, 0.019, 0.019, 0.019, 0.017]
-    for i, (x, half) in enumerate(zip(row(halves, 0.003), halves)):
-        canine = i in (0, len(halves) - 1)
+    halves = [0.020, 0.022, 0.022, 0.023, 0.022, 0.022, 0.020]
+    for i, (x, half) in enumerate(zip(row(halves, 0.002), halves)):
         z = lower_lip(x, open_) + 0.008
         jitter = 1 + rng.uniform(-0.06, 0.06)
-        lower.append(_tooth(f"Lower{i}", (x, front(x, z) + 0.032, z + (0.004 if canine else 0)),
-                            (half, 0.012, (0.022 if canine else 0.017) * jitter), -1,
-                            -2.4 * x + rng.uniform(-0.05, 0.05), taper=0.50 if canine else 0.15))
+        lower.append(_tooth(f"Lower{i}", (x, front(x, z) + 0.032, z), (half, 0.012, 0.019 * jitter), -1,
+                            -2.4 * x + rng.uniform(-0.05, 0.05), taper=0.12))
     bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=1)
     tongue = bpy.context.active_object
     tongue.scale = (0.135, 0.085, 0.036)
