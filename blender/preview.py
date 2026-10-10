@@ -1,6 +1,6 @@
 """Renders Ranko's body in grey-blue clay, to judge its shape.
 
-    blender -b --factory-startup -P blender/preview.py -- [--clay|--look|--fur] <out_dir> [pose:view ...]
+    blender -b --factory-startup -P blender/preview.py -- [--clay|--look|--draft|--fur] <out_dir> [pose:view ...]
 
 Each pose:view is one PNG, <out_dir>/<finish>-<pose>-<view>.png, on a clear
 background so blender/fit.py can lay its outline over a reference's. The
@@ -43,15 +43,15 @@ POSES = {
 # Each view: where the camera sits (a direction from what it looks at),
 # what it looks at, and an orthographic width, or None for a long lens.
 VIEWS = {
-    "front": ((0, -1, 0), (0, 0, 0.53), 1.35),
-    "back": ((0, 1, 0), (0, 0, 0.53), 1.35),
-    "left": ((1, 0, 0), (0, 0, 0.53), 1.35),
-    "right": ((-1, 0, 0), (0, 0, 0.53), 1.35),
-    "three-quarter": ((-0.42, -1, 0.08), (0, 0, 0.53), None),
-    "face": ((0, -1, 0), (0, -0.1, 0.84), 0.66),
-    "face-three-quarter": ((-0.55, -1, 0.06), (0, -0.1, 0.84), 0.70),
+    "front": ((0, -1, 0), (0, 0, 0.56), 1.38),
+    "back": ((0, 1, 0), (0, 0, 0.56), 1.38),
+    "left": ((1, 0, 0), (0, 0, 0.56), 1.38),
+    "right": ((-1, 0, 0), (0, 0, 0.56), 1.38),
+    "three-quarter": ((-0.42, -1, 0.08), (0, 0, 0.56), None),
+    "face": ((0, -1, 0), (0, -0.1, 0.87), 0.62),
+    "face-three-quarter": ((-0.55, -1, 0.06), (0, -0.1, 0.87), 0.66),
     "feet": ((-0.25, -1, 0.35), (0, -0.05, 0.10), 0.70),
-    "hand": ((-0.3, -1, 0.1), (-0.40, -0.05, 0.90), 0.42),
+    "hand": ((-0.3, -1, 0.1), (-0.40, -0.05, 0.95), 0.42),
 }
 CENTER = Vector((0, 0, 0.53))
 SIZE = 640
@@ -107,7 +107,8 @@ def camera(view):
 
 
 def build(pose_name, finish):
-    """Ranko in a pose: `clay`, `look` (materials, no fur) or `fur`."""
+    """Ranko in a pose: `clay`, `look` (materials, no fur), `draft` (thin
+    fur) or `fur`."""
     model.clear_scene()
     pose = POSES[pose_name]
     parts = {"body": model.build_body(pose), "eyes": model.build_eyes(pose), "mouth": model.build_mouth(pose)}
@@ -117,7 +118,7 @@ def build(pose_name, finish):
         for obj in [*parts["eyes"], *parts["mouth"].values()]:
             obj.data.materials.append(white)
     else:
-        look.dress(parts, fur=finish == "fur")
+        look.dress(parts, fur=finish in ("fur", "draft"), draft=finish == "draft")
     look.lights(parts["eyes"])
 
 
@@ -129,8 +130,8 @@ def main():
     out_dir = os.path.abspath(args[0])
     specs = args[1:] or ["stand:front", "stand:three-quarter", "wave:back", "rest:front", "rest:left"]
     setup_render()
-    if finish == "fur":
-        bpy.context.scene.cycles.samples = 64
+    if finish in ("fur", "draft"):
+        bpy.context.scene.cycles.samples = 64 if finish == "fur" else 32
     built = None
     for spec in specs:
         pose_name, view = spec.split(":")

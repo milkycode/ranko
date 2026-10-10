@@ -120,6 +120,10 @@ def _arm(side, shoulder, out_deg=45.0):
     return tuple(elbow), tuple(wrist), tuple(knuckles)
 
 
+# Everything above the legs is designed standing on the ground and then lifted
+# by this much, which is what gives Ranko legs to stand on.
+LIFT = 0.05
+
 SHOULDER = (0.250, 0.020, 0.575)
 HIP = (0.15, 0.03, 0.22)
 ANKLE = (0.172, 0.0, 0.085)
@@ -152,26 +156,51 @@ def hand(side):
     palm = wrist + axis * 0.055
     digits = []
     # Three fat fingers, the outer one shortest, with room between them.
-    for name, across, spread, size, radius in (("index", 0.056, 14, 0.096, 0.026),
-                                               ("middle", 0.0, 0, 0.106, 0.027),
-                                               ("ring", -0.056, -18, 0.086, 0.025)):
+    for name, across, spread, size, radius in (("index", 0.066, 18, 0.094, 0.024),
+                                               ("middle", 0.0, 0, 0.104, 0.025),
+                                               ("ring", -0.066, -22, 0.084, 0.023)):
         s, c = math.sin(math.radians(spread)), math.cos(math.radians(spread))
         base = palm + axis * 0.040 + outward * across
         tip = base + (axis * c + outward * s) * size
         digits.append((name, base, tip, radius, radius + 0.002))
     # The thumb leaves low on the palm's outer edge and leans in front of it.
     thumb = (axis * 0.45 + outward * 0.85 - normal * 0.25).normalized()
-    base = palm + outward * 0.052 - axis * 0.020
-    digits.append(("thumb", base, base + thumb * 0.070, 0.031, 0.029))
+    base = palm + outward * 0.058 - axis * 0.024
+    digits.append(("thumb", base, base + thumb * 0.068, 0.028, 0.027))
     return Hand(palm, (axis, outward, normal), digits)
 
 
+def _lifted(p):
+    return (p[0], p[1], p[2] + LIFT)
+
+
+def body_space(p):
+    """Points carried from the lifted body down to where it was designed."""
+    return (p[0], p[1], p[2] - LIFT)
+
+
 def _bones():
+    bones = [_lift_bone(b) for b in _upper_bones()]
+    for side, s in (("L", 1), ("R", -1)):
+        ankle = ANKLE if s > 0 else _mirror(ANKLE)
+        bones += [
+            Bone(f"thigh.{side}", "hips", _lifted(HIP if s > 0 else _mirror(HIP)), ankle),
+            Bone(f"foot.{side}", f"thigh.{side}", ankle, (s * FOOT_X, -0.18, 0.03)),
+        ]
+    return bones
+
+
+def _lift_bone(b):
+    return b if b.name == "root" else Bone(b.name, b.parent, _lifted(b.head), _lifted(b.tail))
+
+
+def _upper_bones():
+    """The bones above the legs, where they were designed."""
     bones = [
         Bone("root", None, (0, 0, 0), (0, 0, 0.12)),
         Bone("hips", "root", (0, 0.02, 0.20), (0, 0.02, 0.44)),
         Bone("chest", "hips", (0, 0.02, 0.44), (0, 0.0, 0.64)),
-        Bone("head", "chest", (0, 0.0, 0.62), (0, 0.0, 1.06)),
+        Bone("head", "chest", (0, 0.0, 0.62), (0, 0.0, 1.03)),
         Bone("jaw", "head", (0, 0.02, 0.74), (0, -0.20, 0.66)),
     ]
     for side, s in (("L", 1), ("R", -1)):
@@ -184,11 +213,6 @@ def _bones():
         ]
         for name, base, tip, _, _ in hand(s).digits:
             bones.append(Bone(f"{name}.{side}", f"hand.{side}", tuple(base), tuple(tip)))
-        ankle = ANKLE if s > 0 else _mirror(ANKLE)
-        bones += [
-            Bone(f"thigh.{side}", "hips", HIP if s > 0 else _mirror(HIP), ankle),
-            Bone(f"foot.{side}", f"thigh.{side}", ankle, (s * FOOT_X, -0.18, 0.05)),
-        ]
     for i in range(len(TAIL) - 1):
         bones.append(Bone(f"tail.{i + 1}", "hips" if i == 0 else f"tail.{i}", TAIL[i], TAIL[i + 1]))
     return bones
@@ -203,8 +227,21 @@ BONES = _bones()
 # the head, the grin right under them, a big round chin under that.
 EYE_RADIUS = 0.079
 EYE_X, EYE_Z = 0.096, 0.918
-MOUTH_HALF_WIDTH = 0.204
+MOUTH_HALF_WIDTH = 0.245
 UPPER_LIP_Z, UPPER_LIP_CURVE = 0.808, 0.30
+
+
+# The head is sculpted at the size of the close-ups it was measured from and
+# set on the body a little smaller, shrunk toward where it meets the chest.
+HEAD_SCALE = 0.92
+HEAD_PIVOT = (0.0, -0.04, 0.60)
+HEAD_MATRIX = (Matrix.Translation(HEAD_PIVOT) @ Matrix.Scale(HEAD_SCALE, 4)
+               @ Matrix.Translation(-Vector(HEAD_PIVOT)))
+
+
+def head_space(p):
+    """Points carried into the head's own, unscaled frame."""
+    return tuple((p[i] - HEAD_PIVOT[i]) / HEAD_SCALE + HEAD_PIVOT[i] for i in range(3))
 
 
 def _head_shape(p):
@@ -214,7 +251,7 @@ def _head_shape(p):
     h = ellipsoid(p, (0, -0.005, 0.822), (0.300, 0.255, 0.252))
     h = smin(h, ellipsoid(p, (0, -0.040, 0.722), (0.280, 0.222, 0.145)), 0.10)
     for s in (1, -1):
-        h = smin(h, ellipsoid(p, (s * 0.140, -0.192, 0.800), (0.092, 0.070, 0.072)), 0.05)
+        h = smin(h, ellipsoid(p, (s * 0.200, -0.165, 0.825), (0.085, 0.075, 0.070)), 0.05)
     h = smin(h, ellipsoid(p, (0, -0.212, 0.845), (0.120, 0.052, 0.042)), 0.04)
     return smin(h, ellipsoid(p, (0, -0.185, 0.680), (0.205, 0.095, 0.075)), 0.06)
 
@@ -250,12 +287,12 @@ def face_features():
         brow, radii = [], []
         for i in range(9):
             u = i / 8
-            angle = math.radians(26 + 86 * u)
+            angle = math.radians(26 + 92 * u)
             r = EYE_RADIUS + 0.014
             x = ex + s * r * math.cos(angle)
-            z = ez + r * math.sin(angle) * 0.80 + 0.012 + 0.016 * u * u
-            brow.append(_on_skin(x, z, -0.006))
-            radii.append(0.020 + 0.022 * math.sin(math.pi * min(1.0, u * 1.15)))
+            z = ez + r * math.sin(angle) * 0.80 + 0.012 + 0.030 * u * u
+            brow.append(_on_skin(x, z, -0.010))
+            radii.append(0.022 + 0.026 * math.sin(math.pi * min(1.0, u * 1.15)))
         features.append(("brow", brow, radii, 0.025, False))
         # A thin rim of lid all round the eye, a little fuller underneath.
         lid = []
@@ -286,17 +323,17 @@ def lower_lip(x, open_=1.0):
     return middle + (upper_lip(w) - middle) * abs(x / w) ** 2.3
 
 
-def mouth_hollow(open_=1.0):
-    """The cavity behind the lips: an ellipsoid reaching back into the head."""
-    return (0, front(0, 0.76) + 0.09, UPPER_LIP_Z - 0.5 * MOUTH_DEPTH * open_), (MOUTH_HALF_WIDTH + 0.01, 0.13, 0.15)
+MOUTH_CAVITY = 0.09  # how deep under the skin the mouth reaches
 
 
 def _mouth(p, open_=1.0):
-    """The hollow of the grin: between the two lips, as deep as the cavity."""
+    """The hollow of the grin: between the two lips, and as deep under the
+    skin of the face as the cavity, so a grin this wide follows the face
+    round to its corners."""
     x, y, z = p
-    center, radii = mouth_hollow(open_)
     between = np.maximum(z - upper_lip(x), lower_lip(x, open_) - z)
-    return np.maximum(ellipsoid(p, center, radii), between)
+    under_skin = np.maximum(-_head_shape(p) - MOUTH_CAVITY, y + 0.02)
+    return np.maximum(between, under_skin)
 
 
 def _head(p, mouth_open):
@@ -319,19 +356,19 @@ def _hand(p_hand, digit_points, side):
     h = hand(side)
     d = ellipsoid(p_hand, h.palm, (0.068, 0.074, 0.038), h.basis)
     for name, base, tip, rb, rt in h.digits:
-        d = smin(d, round_cone(digit_points(name), base, tip, rb, rt), 0.007)
+        d = smin(d, round_cone(digit_points(name), base, tip, rb, rt), 0.005)
     return d
 
 
 def _foot(p, side):
     """A big oval paw, three toes at the front parted by grooves, a flat sole."""
     x = side * FOOT_X
-    d = ellipsoid(p, (x, -0.045, 0.070), (0.128, 0.165, 0.074))
-    for dx, half in ((-0.070, (0.044, 0.058, 0.050)), (0.0, (0.047, 0.062, 0.053)), (0.070, (0.044, 0.058, 0.050))):
-        d = smin(d, ellipsoid(p, (x + dx, -0.172, 0.060), half), 0.008)
+    d = ellipsoid(p, (x, -0.045, 0.046), (0.126, 0.162, 0.050))
+    for dx, half in ((-0.070, (0.044, 0.058, 0.038)), (0.0, (0.047, 0.062, 0.040)), (0.070, (0.044, 0.058, 0.038))):
+        d = smin(d, ellipsoid(p, (x + dx, -0.172, 0.040), half), 0.008)
     for dx in (-0.035, 0.035):
-        d = smax(d, -round_cone(p, (x + dx, -0.250, 0.055), (x + dx, -0.100, 0.135), 0.016, 0.008), 0.010)
-    return smax(d, -p[2], 0.012)
+        d = smax(d, -round_cone(p, (x + dx, -0.250, 0.035), (x + dx, -0.100, 0.095), 0.016, 0.008), 0.010)
+    return smax(d, -p[2], 0.006)
 
 
 # --- Ranko ------------------------------------------------------------------
@@ -339,33 +376,58 @@ def _foot(p, side):
 def field(at, mouth_open=1.0):
     """Ranko's signed distance: `at(bone)` gives the sample points in that
     bone's rest frame, so the same shapes build any pose."""
-    hips, chest = at("hips"), at("chest")
+    hips, chest = body_space(at("hips")), body_space(at("chest"))
 
-    # A pear of a body, widest low down, under a narrower chest, its round
-    # bottom held up off the ground by two short legs.
-    d = ellipsoid(hips, (0, 0.030, 0.37), (0.268, 0.255, 0.245))
-    d = smin(d, ellipsoid(hips, (0, 0.04, 0.262), (0.205, 0.18, 0.095)), 0.08)
-    d = smin(d, ellipsoid(chest, (0, 0.025, 0.50), (0.220, 0.21, 0.15)), 0.12)
-    d = smin(d, _head(at("head"), mouth_open), 0.03)
+    # A belly, widest and fullest low down where it bulges forward, under a
+    # narrower chest, held up off the ground by two short legs.
+    d = ellipsoid(hips, (0, 0.020, 0.350), (0.312, 0.270, 0.220))
+    d = smin(d, ellipsoid(hips, (0, -0.045, 0.318), (0.258, 0.232, 0.172)), 0.06)
+    d = smin(d, ellipsoid(hips, (0, 0.040, 0.250), (0.210, 0.180, 0.090)), 0.08)
+    d = smin(d, ellipsoid(chest, (0, 0.025, 0.510), (0.225, 0.205, 0.150)), 0.12)
+    # A crease under the chin, but the back of the head flows into the back.
+    head = body_space(at("head"))
+    neck = 0.03 + 0.09 * np.clip((head[1] + 0.02) / 0.20, 0, 1)
+    d = smin(d, _head(head_space(head), mouth_open) * HEAD_SCALE, neck)
 
     for side, s in (("L", 1), ("R", -1)):
         shoulder = SHOULDER if s > 0 else _mirror(SHOULDER)
         elbow, wrist = (ELBOW_L, WRIST_L) if s > 0 else (ELBOW_R, WRIST_R)
-        arm = round_cone(at(f"upper_arm.{side}"), shoulder, elbow, 0.085, 0.078)
-        arm = smin(arm, round_cone(at(f"forearm.{side}"), elbow, wrist, 0.076, 0.064), 0.03)
-        arm = smin(arm, _hand(at(f"hand.{side}"), lambda name: at(f"{name}.{side}"), s), 0.03)
+        arm = round_cone(body_space(at(f"upper_arm.{side}")), shoulder, elbow, 0.085, 0.078)
+        arm = smin(arm, round_cone(body_space(at(f"forearm.{side}")), elbow, wrist, 0.076, 0.064), 0.03)
+        arm = smin(arm, _hand(body_space(at(f"hand.{side}")), lambda name: body_space(at(f"{name}.{side}")), s), 0.03)
         d = smin(d, arm, 0.05)
 
-        hip, ankle = (HIP, ANKLE) if s > 0 else (_mirror(HIP), _mirror(ANKLE))
-        leg = round_cone(at(f"thigh.{side}"), hip, ankle, 0.088, 0.082)
+        hip, ankle = (_lifted(HIP), ANKLE) if s > 0 else (_lifted(_mirror(HIP)), _mirror(ANKLE))
+        leg = round_cone(at(f"thigh.{side}"), hip, ankle, 0.106, 0.090)
         leg = smin(leg, _foot(at(f"foot.{side}"), s), 0.04)
+        # Nothing of the leg below the sole.
+        leg = smax(leg, -at(f"foot.{side}")[2], 0.006)
         d = smin(d, leg, 0.05)
 
     tail = None
-    for i in range(len(TAIL) - 1):
-        seg = round_cone(at(f"tail.{i + 1}"), TAIL[i], TAIL[i + 1], TAIL_RADII[i], TAIL_RADII[i + 1])
-        tail = seg if tail is None else smin(tail, seg, 0.02)
+    for i, (points, radii) in enumerate(tail_curve()):
+        seg = tube(body_space(at(f"tail.{i + 1}")), points, radii)
+        tail = seg if tail is None else np.minimum(tail, seg)
     return smin(d, tail, 0.04)
+
+
+@cache
+def tail_curve(steps=6):
+    """The tail as a smooth curve through its points, cut into the stretch
+    each tail bone carries: [(points, radii)] per bone."""
+    pts = [Vector(TAIL[0])] + [Vector(q) for q in TAIL] + [Vector(TAIL[-1])]
+    rad = [TAIL_RADII[0]] + list(TAIL_RADII) + [TAIL_RADII[-1]]
+
+    def catmull(a, b, c, d, t):
+        return 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t ** 3)
+
+    stretches = []
+    for i in range(len(TAIL) - 1):
+        a, b, c, d = pts[i:i + 4]
+        ra, rb, rc, rd = rad[i:i + 4]
+        ts = [k / steps for k in range(steps + 1)]
+        stretches.append(([tuple(catmull(a, b, c, d, t)) for t in ts], [catmull(ra, rb, rc, rd, t) for t in ts]))
+    return stretches
 
 
 def pose_matrices(pose):
@@ -461,7 +523,8 @@ def build_eyes(pose=None):
         bpy.ops.object.shade_smooth()
         for v in eye.data.vertices:
             v.co.z *= 1.05
-        eye.matrix_world = m @ Matrix.Translation(Vector(eye_center(side))) @ gaze(side).to_matrix().to_4x4()
+        eye.matrix_world = (m @ Matrix.Translation((0, 0, LIFT)) @ HEAD_MATRIX @ Matrix.Translation(Vector(eye_center(side)))
+                            @ gaze(side).to_matrix().to_4x4())
         eyes.append(eye)
     return eyes
 
@@ -512,23 +575,23 @@ def build_mouth(pose=None, open_=1.0):
     standing on the lower one, and a tongue on the floor of the hollow."""
     m = pose_matrices(pose or {})["head"]
     upper = []
-    for i, x in enumerate(np.linspace(-0.146, 0.146, 7)):
+    for i, x in enumerate(np.linspace(-0.180, 0.180, 9)):
         lip = upper_lip(x)
         upper.append(_tooth(f"Upper{i}", (x, front(x, lip) + 0.030, lip - 0.007), (0.0145, 0.010, 0.017), 1,
                             -2.4 * x, taper=0.60))
     lower = []
-    for i, x in enumerate(np.linspace(-0.100, 0.100, 6)):
+    for i, x in enumerate(np.linspace(-0.130, 0.130, 7)):
         z = lower_lip(x, open_) + 0.009
         lower.append(_tooth(f"Lower{i}", (x, front(x, z) + 0.030, z), (0.0160, 0.011, 0.016), -1, -2.4 * x))
-    (cx, cy, cz), _ = mouth_hollow(open_)
     bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=1)
     tongue = bpy.context.active_object
-    tongue.scale = (0.115, 0.075, 0.032)
-    tongue.location = (0, cy + 0.050, lower_lip(0, open_) + 0.030)
+    tongue.scale = (0.135, 0.075, 0.032)
+    z = lower_lip(0, open_) + 0.030
+    tongue.location = (0, front(0, z) + 0.085, z)
     parts = {"TeethUpper": _joined("TeethUpper", upper), "TeethLower": _joined("TeethLower", lower),
              "Tongue": _joined("Tongue", [tongue])}
     for obj in parts.values():
-        obj.matrix_world = m
+        obj.matrix_world = m @ Matrix.Translation((0, 0, LIFT)) @ HEAD_MATRIX
     return parts
 
 
@@ -541,29 +604,31 @@ def surface_regions(body, open_=1.0):
     body.data.vertices.foreach_get("co", co)
     p = tuple(co.reshape(-1, 3).T)
     x, y, z = p
-    mouth = _mouth(p, open_)
+    pb = body_space(p)
+    ph = head_space(pb)
+    mouth = _mouth(ph, open_) * HEAD_SCALE
     inside = np.clip(1 - mouth / 0.004, 0, 1)
-    sole = (z < 0.008).astype(np.float32)
+    sole = (z < 0.003).astype(np.float32)
     fur = np.clip((mouth - 0.010) / 0.03, 0, 1)
-    fur = np.minimum(fur, 1 - np.clip((0.022 - z) / 0.012, 0, 1))
+    fur = np.minimum(fur, 1 - np.clip((0.010 - z) / 0.006, 0, 1))
     # The face: the front of the head, between the brows and the chin.
-    face = ellipsoid(p, (0, -0.25, 0.83), (0.26, 0.10, 0.22))
-    fur = np.minimum(fur, 0.50 + 0.50 * np.clip(face / 0.05, 0, 1))
+    face = ellipsoid(ph, (0, -0.25, 0.83), (0.26, 0.10, 0.22))
+    fur = np.minimum(fur, 0.45 + 0.55 * np.clip(face / 0.05, 0, 1))
     # The brows keep their full fur, so they stand up out of the short fur
     # of the face.
     for name, points, radii, fillet, carve in face_features():
         if name == "brow":
-            fur = np.maximum(fur, 1.1 * np.clip(1 - np.maximum(tube(p, points, radii), 0) / 0.012, 0, 1))
+            fur = np.maximum(fur, 1.1 * np.clip(1 - np.maximum(tube(ph, points, radii), 0) / 0.012, 0, 1))
     for s in (1, -1):
-        eye = sphere(p, eye_center(s), EYE_RADIUS)
+        eye = sphere(ph, eye_center(s), EYE_RADIUS) * HEAD_SCALE
         # Short on the lids, none under the eyeball.
         fur = np.minimum(fur, 0.30 + 0.70 * np.clip((eye - 0.002) / 0.04, 0, 1))
         fur = np.where(eye < 0.002, 0, fur)
         h = hand(s)
-        palm = ellipsoid(p, h.palm, (0.068, 0.074, 0.038), h.basis)
+        palm = ellipsoid(pb, h.palm, (0.068, 0.074, 0.038), h.basis)
         for _, base, tip, rb, rt in h.digits:
-            palm = np.minimum(palm, round_cone(p, base, tip, rb, rt))
-        fur = np.minimum(fur, 0.22 + 0.78 * np.clip(palm / 0.03, 0, 1))
+            palm = np.minimum(palm, round_cone(pb, base, tip, rb, rt))
+        fur = np.minimum(fur, 0.15 + 0.85 * np.clip(palm / 0.03, 0, 1))
         foot = ellipsoid(p, (s * FOOT_X, -0.06, 0.07), (0.15, 0.20, 0.10))
         fur = np.minimum(fur, 0.55 + 0.45 * np.clip(foot / 0.03, 0, 1))
     return inside, sole, fur
@@ -581,18 +646,22 @@ def surface_tone(body, open_=1.0):
     def near(distance, reach):
         return np.clip(1 - np.maximum(distance, 0) / reach, 0, 1)
 
-    tone = 1 - 0.35 * near(_mouth(p, open_) - 0.004, 0.025)
+    ph = head_space(body_space(p))
+    tone = 1 - 0.35 * near(_mouth(ph, open_) - 0.004, 0.025)
     for s in (1, -1):
-        tone *= 1 - 0.45 * near(sphere(p, eye_center(s), EYE_RADIUS) - 0.004, 0.022)
+        tone *= 1 - 0.45 * near(sphere(ph, eye_center(s), EYE_RADIUS) - 0.004, 0.022)
         x = s * FOOT_X
         for dx in (-0.035, 0.035):
-            groove = round_cone(p, (x + dx, -0.250, 0.055), (x + dx, -0.100, 0.135), 0.016, 0.008)
+            groove = round_cone(p, (x + dx, -0.250, 0.035), (x + dx, -0.100, 0.095), 0.016, 0.008)
             tone *= 1 - 0.35 * near(groove, 0.012)
     for name, points, radii, fillet, carve in face_features():
-        d = tube(p, points, radii)
+        d = tube(ph, points, radii)
         if name == "brow":
+            # Lit along the ridge, shaded only on its underside, toward the eye.
+            side = 1 if points[0][0] > 0 else -1
+            under = sphere(ph, eye_center(side), EYE_RADIUS) < d + 0.006
             tone *= 1 + 0.18 * near(d, 0.006)
-            tone *= 1 - 0.40 * near(np.abs(d - 0.012), 0.009)
+            tone *= 1 - 0.50 * near(np.abs(d - 0.010), 0.010) * under
         elif name == "seam":
             tone *= 1 - 0.25 * near(d, 0.012)
     return tone

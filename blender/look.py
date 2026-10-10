@@ -154,7 +154,7 @@ def eye_material():
     return mat
 
 
-def add_fur(body, weights, count=160000, length=0.013):
+def add_fur(body, weights, count=220000, length=0.012, children=14):
     """Hair over the body, its density from `weights` (a vertex group)."""
     mod = body.modifiers.new("Fur", "PARTICLE_SYSTEM")
     psys = mod.particle_system
@@ -169,7 +169,7 @@ def add_fur(body, weights, count=160000, length=0.013):
     ps.material = 1  # counted from 1: the body's first slot, Fur
     ps.child_type = "INTERPOLATED"
     ps.child_percent = 4
-    ps.rendered_child_count = 14
+    ps.rendered_child_count = children
     ps.child_length = 1.0
     ps.clump_factor = 0.20
     ps.clump_shape = 0.25
@@ -177,7 +177,7 @@ def add_fur(body, weights, count=160000, length=0.013):
     ps.roughness_1_size = 1.0
     ps.roughness_endpoint = 0.008
     ps.roughness_end_shape = 1.0
-    ps.root_radius = 0.0007
+    ps.root_radius = 0.0005
     ps.tip_radius = 0.0
     ps.radius_scale = 1.0
     ps.display_step = 3
@@ -189,8 +189,9 @@ def add_fur(body, weights, count=160000, length=0.013):
     return mod
 
 
-def dress(parts, fur=True):
-    """Materials on every part, fur on the body. `parts` is what
+def dress(parts, fur=True, draft=False):
+    """Materials on every part, fur on the body (fewer strands for a
+    `draft`). `parts` is what
     blender/model.py built: body, eyes, and the mouth's teeth and tongue."""
     body = parts["body"]
     hair = fur_material()
@@ -224,7 +225,8 @@ def dress(parts, fur=True):
     attribute = me.color_attributes.new("tone", "BYTE_COLOR", "CORNER")
     attribute.data.foreach_set("color", np.repeat(tone, 4).astype(np.float32))
     if fur:
-        add_fur(body, "fur")
+        # A draft has a third of the strands: quicker to render, a little coarser.
+        add_fur(body, "fur", count=120000 if draft else 220000, children=9 if draft else 14)
 
     eye = eye_material()
     for e in parts["eyes"]:
