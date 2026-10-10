@@ -13,7 +13,8 @@
     },
     "working": {
       "frames": 24,
-      "loop": true
+      "loop": true,
+      "posture": "sit"
     },
     "happy": {
       "frames": 32,
@@ -25,7 +26,42 @@
     },
     "sleepy": {
       "frames": 64,
-      "loop": true
+      "loop": true,
+      "posture": "cushion"
+    },
+    "sit-down": {
+      "frames": 16,
+      "loop": false,
+      "posture": "sit",
+      "transition": [
+        "stand",
+        "sit"
+      ]
+    },
+    "stand-up": {
+      "frames": 16,
+      "loop": false,
+      "transition": [
+        "sit",
+        "stand"
+      ]
+    },
+    "doze-off": {
+      "frames": 30,
+      "loop": false,
+      "posture": "cushion",
+      "transition": [
+        "stand",
+        "cushion"
+      ]
+    },
+    "wake-up": {
+      "frames": 24,
+      "loop": false,
+      "transition": [
+        "cushion",
+        "stand"
+      ]
     }
   }
 }
