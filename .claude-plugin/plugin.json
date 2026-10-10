@@ -1,0 +1,68 @@
+{
+  "name": "ranko",
+  "version": "0.1.0",
+  "description": "Ranko, the Rankello monster, lives above the prompt and reacts to what Claude is doing: waves hello, works, celebrates, wobbles, blushes, naps, and can be patted and dragged.",
+  "author": {
+    "name": "milkycode GmbH",
+    "url": "https://www.milkycode.com"
+  },
+  "userConfig": {
+    "drag": {
+      "type": "boolean",
+      "title": "Drag Ranko",
+      "description": "Press on Ranko and drag him along the band above the prompt; he dangles while held and lands where you let go.",
+      "required": false,
+      "default": true
+    },
+    "pats": {
+      "type": "boolean",
+      "title": "Pat Ranko",
+      "description": "A click on Ranko without dragging pats him: a squish, a happy squint and hearts.",
+      "required": false,
+      "default": true
+    },
+    "toolProps": {
+      "type": "boolean",
+      "title": "Tool props",
+      "description": "Ranko holds a prop for the tool Claude is using: a magnifier to read or search, knitting needles to edit, a keyboard for the shell, binoculars for the web.",
+      "required": false,
+      "default": true
+    },
+    "miniRankos": {
+      "type": "boolean",
+      "title": "Mini Rankos",
+      "description": "Each running subagent gets a half-size Ranko beside the main one; it walks off when the subagent finishes.",
+      "required": false,
+      "default": true
+    },
+    "stuffing": {
+      "type": "boolean",
+      "title": "Stuffed by context",
+      "description": "Ranko grows rounder as the context window fills and deflates with a sigh when it is compacted.",
+      "required": false,
+      "default": true
+    },
+    "blush": {
+      "type": "boolean",
+      "title": "Blush at kind words",
+      "description": "Thanks or praise in a prompt makes Ranko blush.",
+      "required": false,
+      "default": true
+    },
+    "fidgets": {
+      "type": "boolean",
+      "title": "Idle fidgets",
+      "description": "Left alone, Ranko now and then looks around, wonders, gives a thumbs up or hops.",
+      "required": false,
+      "default": true
+    },
+    "sounds": {
+      "type": "boolean",
+      "title": "Sound effects",
+      "description": "Little sounds for pats, jumps, wobbles, blushes, being picked up and put down, deflating and dozing off. They play on macOS; elsewhere Ranko stays silent.",
+      "required": false,
+      "default": true
+    }
+  },
+  "license": "MIT"
+}

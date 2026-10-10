@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "ranko",
+  "description": "Ranko, the Rankello monster, lives above the Claude Code prompt",
+  "owner": {
+    "name": "milkycode GmbH",
+    "url": "https://www.milkycode.com"
+  },
+  "plugins": [
+    {
+      "name": "ranko",
+      "description": "Ranko, the Rankello monster, lives above the prompt and reacts to what Claude is doing: waves hello, works, celebrates, wobbles, blushes, naps, and can be patted and dragged.",
+      "version": "0.1.0",
+      "source": "./",
+      "category": "fun"
+    }
+  ]
+}

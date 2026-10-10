@@ -1,0 +1,15 @@
+{
+  "fps": 24,
+  "columns": 12,
+  "rows": 6,
+  "clips": {
+    "idle": {
+      "frames": 48,
+      "loop": true
+    },
+    "hello": {
+      "frames": 56,
+      "loop": false
+    }
+  }
+}

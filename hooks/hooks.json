@@ -1,0 +1,4 @@
+{
+  "description": "Ranko: his drawing above the prompt and his moods, driven by Claude's turns and tool calls",
+  "modules": ["./register.tsx"]
+}

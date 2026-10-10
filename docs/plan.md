@@ -14,11 +14,11 @@ The mod never knows which character it plays. It reads
 
 | plushie | Ranko |
 | :-- | :-- |
-| `blender/plush.py` builds Clawd from primitives in code | a sculpted, rigged `blender/ranko.blend`, itself built by script; another script poses and renders it |
-| procedural motion sets object transforms | the same per-clip pose functions, setting bones and shape keys |
+| `blender/plush.py` builds Clawd from primitives in code | `blender/model.py` sculpts Ranko as a distance field, `rig.py` rigs him |
+| procedural motion sets object transforms | per-clip pose functions in `clips.py`, setting bones |
 | 16×6 cells, 256×192 px (Clawd is wide) | **12×6 cells, 192×192 px** (Ranko is about as wide as tall) |
 | `/plushie`, `miniClawds` | `/ranko`, `miniRankos` |
-| `composite.py`, `make_sounds.py` | reused as they are |
+| `composite.py`, `make_sounds.py` | reused, with a hello sound added |
 
 ## Where it can show
 
@@ -29,53 +29,33 @@ The mod never knows which character it plays. It reads
 
 ## How the model is made
 
-Claude models, rigs and grooms Ranko by script, in Blender 5.2 LTS run
-headless in WSL (Cycles on the RTX 4060 through OptiX). Every step is code
-in `blender/`, so the `.blend` can be rebuilt from scratch at any time, and
-every change is checked by rendering it and comparing it with `previews/`:
+Ranko is built, rigged and groomed by script in Blender 5.2 LTS, headless
+in WSL (Cycles on the RTX 4060 through CUDA; OptiX does not start under
+WSL). There is no `.blend` to keep: every run builds him from the scripts in
+`blender/`, and every change is checked by rendering it beside `previews/`
+(`blender/review.py`, `fit.py`).
 
-1. **Blockout.** A skeleton of points with radii (head, belly, arms,
-   hands, fingers, feet, tail) through the Skin modifier: a single mesh
-   whose shape follows the bones it will later be rigged to.
-2. **Shaping.** Remeshed to even quads, then pushed toward the references:
-   front and side silhouettes are cut out of `previews/` and matched against
-   renders from the same angle, as a number and by eye.
-3. **Face.** Eyes, mouth cavity, teeth and tongue as their own objects;
-   shape keys on the body for mouth, lids and brows.
-4. **Rig.** The armature from the same skeleton, weights painted
-   automatically and corrected where a fold shows.
-5. **Fur.** Hair on the body, blue with purple patches, clumped, long
-   enough to read as fluffy at 192 px.
-
-The `.blend` opens in Blender (WSLg, or a Windows install of the same
-version) for a look around; it is never edited by hand, or the next rebuild
-would undo it.
-
-## The model contract
-
-What `ranko.blend` must hold so the scripts can pose and render it; the
-intake script checks it.
-
-- **Scale and facing:** metres, Ranko about 1.0 tall, feet on z = 0, facing
-  −Y. Rest pose: arms slightly away from the body (A-pose), mouth closed in a
-  soft smile.
-- **Objects:**
-  - `Body`: head, belly, arms, four-finger hands, feet with toe bumps and the
-    tail, one watertight quad mesh that deforms cleanly.
-  - `EyeL`, `EyeR`: separate white eyeballs with iris, pupil and a
-    highlight, pivoting at their centre so they can look around.
-  - `TeethUpper`, `TeethLower`, `Tongue`, `MouthInside` (the dark cavity).
-- **Shape keys on `Body`:** `mouth_open`, `smile`, `frown`, `mouth_o`,
-  `blink_L`, `blink_R`, `brow_up`, `brow_worried`, `brow_angry`, `squint`.
-- **Armature `Rig`:** root, hips, spine, chest, head, jaw; per side
-  upper arm, forearm, hand, thumb and four fingers, thigh, shin, foot;
-  tail in four segments.
-- **Fur:** blue base with purple patches (see `previews/`), grown by the
-  script.
-
-A clip can also be keyframed: an Action named `clip:<name>` in the file
-takes the place of that clip's pose function, for a clip (the wave) that
-needs more than a formula.
+1. **Sculpt** (`model.py`). A signed distance field: ellipsoids and round
+   cones on a skeleton, joined with smooth unions whose fillet sets how soft
+   each joint is; eye sockets, the grin and the seam carved with smooth
+   differences; brows, lids and lips laid on the skin as tubes. OpenVDB cuts
+   one closed quad mesh from it. The rest pose has the arms out at 60° so
+   nothing touches.
+2. **Look** (`look.py`). Hair on the body, blue with violet patches, darker
+   at the roots, shorter on the face and hands, none in the mouth or on the
+   soles; a tone painted on the skin shades the fur in sockets and grooves.
+   Glossy eyes lit apart from the studio, so the iris stays clear.
+3. **Rig** (`rig.py`). An armature on the same skeleton plus face bones
+   (eyes, upper and lower lids, brows, jaw). Each bone pulls the skin over
+   the shapes it carries, fading out over a reach set per kind of bone; the
+   head shares its pull with the jaw and brows. Eyes, lids, teeth and tongue
+   hang from their bones. The fur follows the skin.
+4. **Clips** (`clips.py`). Each clip is a function of time returning a pose:
+   turns in the rest pose's world axes, finger curl and spread, twists,
+   offsets, scales, how shut the lids are.
+5. **Bake** (`bake.py`, `composite.py`). 192 px frames as a plush and a
+   shadow layer, laid over each other as plushie does. Fewer, thicker strands
+   than the previews: a pixel is about 6 mm of Ranko.
 
 ## Clips, and the references for each
 
@@ -97,23 +77,20 @@ needs more than a formula.
 
 ## Phases
 
-0. **Setup.** Repo, kitty, Blender 5.2 LTS in WSL (done). Run plushie as
-   it is in kitty under WSL to confirm mods and pictures work here before
-   anything is modelled. Port the bake scripts from macOS/Metal to the
-   RTX 4060 (OptiX, Blender path from `$BLENDER`, contact sheets in PIL
-   instead of ImageMagick) and time a frame.
-1. **Model.** Blockout, shaping and face, as above, until the stills sit
-   next to `previews/` without looking like someone else.
-2. **Rig and fur.** Armature, weights, shape keys, hair; a contact sheet of
-   extreme poses to catch bad folds.
-3. **Look-dev.** Fur, eyes, lights and shadow until Ranko reads at 192 px on
-   a dark terminal.
-4. **MVP clips.** `idle`, `hello`, `working`, `happy`, `oops`, `sleepy`.
-5. **Port the mod.** Renames, 12×6, `hello` on session start, tests.
-6. **The rest.** The remaining clips, tool props, sounds.
-7. **Publish.** `milkycode/ranko`, marketplace, README, demo GIF, a nod to
-   Rankello.
+0. **Setup.** Repo, kitty, Blender 5.2 LTS in WSL, plushie seen working in
+   kitty. *Done.*
+1. **Model and look.** Sculpted and dressed until reviews against
+   `previews/` came out close. *Done.*
+2. **Rig.** Armature, weights, lids, finger controls; a pose with every
+   joint bent to catch bad folds. *Done.*
+3. **Port the mod.** Renames, 12×6, `hello` on session start, tests pass.
+   *Done.*
+4. **MVP clips.** `idle` and `hello` baked; next `working`, `happy`, `oops`,
+   `sleepy`.
+5. **The rest.** The remaining clips, tool props, stuffing sizes.
+6. **Publish.** Marketplace, README, demo GIF, a nod to Rankello.
 
 ## Open
 
-- A reference for `working`, and a view from behind (the tail).
+- `claude plugin test` runs every test file under the repo, so the
+  `plushie/` reference copy has to live outside it for the tests to pass.
