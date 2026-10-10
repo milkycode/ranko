@@ -197,7 +197,7 @@ def dress(parts, fur=True, draft=False):
     hair = fur_material()
     body.data.materials.append(hair)
     body.data.materials.append(skin_material())
-    body.data.materials.append(plain("Mouth", (0.018, 0.010, 0.045), roughness=0.55))
+    body.data.materials.append(plain("Mouth", (0.030, 0.022, 0.075), roughness=0.55))
 
     body.data.materials.append(plain("Pad", (0.05, 0.08, 0.36), roughness=0.55, subsurface=0.1))
 
@@ -234,7 +234,7 @@ def dress(parts, fur=True, draft=False):
     teeth = plain("Teeth", (0.86, 0.85, 0.80), roughness=0.22, coat=0.4, subsurface=0.2)
     parts["mouth"]["TeethUpper"].data.materials.append(teeth)
     parts["mouth"]["TeethLower"].data.materials.append(teeth)
-    parts["mouth"]["Tongue"].data.materials.append(plain("Tongue", (0.62, 0.20, 0.26), roughness=0.35,
+    parts["mouth"]["Tongue"].data.materials.append(plain("Tongue", (0.50, 0.17, 0.22), roughness=0.35,
                                                          subsurface=0.3))
 
 

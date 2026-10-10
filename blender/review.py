@@ -24,6 +24,7 @@ PAIRS = [
     ("n5ocru92jcaa3qe.jpeg", None, "hello-three-quarter"),
     ("cr714zvnmpglrw9.jpeg", None, "stand-front"),
     ("cr714zvnmpglrw9.jpeg", (420, 150, 1650, 1300), "stand-face"),
+    ("n5ocru92jcaa3qe.jpeg", (560, 200, 1560, 1100), "hello-face-three-quarter"),
     ("Ranko_back.jpeg", None, "wave-back"),
     ("n5ocru92jcaa3qe.jpeg", (80, 240, 700, 960), "hello-hand"),
     ("Ranko_at_Work.jpeg", (700, 1450, 1850, 2048), "hello-feet"),

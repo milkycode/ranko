@@ -228,7 +228,7 @@ BONES = _bones()
 EYE_RADIUS = 0.077
 EYE_X, EYE_Z = 0.094, 0.912
 MOUTH_HALF_WIDTH = 0.222
-UPPER_LIP_Z, UPPER_LIP_CURVE = 0.808, 0.30
+UPPER_LIP_Z, UPPER_LIP_CURVE = 0.802, 0.55
 
 
 # The head is sculpted at the size of the close-ups it was measured from and
@@ -247,13 +247,14 @@ def head_space(p):
 def _head_shape(p):
     """The head before any carving: a big ball, a little taller than wide,
     widest at the cheeks and drawn in again toward the chin, cheeks puffed
-    up beside the mouth, a pad over the upper lip and a soft chin under it."""
+    up beside the mouth, a pad over the upper lip and a big round chin under
+    it."""
     h = ellipsoid(p, (0, -0.005, 0.834), (0.276, 0.252, 0.264))
     h = smin(h, ellipsoid(p, (0, -0.045, 0.730), (0.248, 0.212, 0.130)), 0.10)
     for s in (1, -1):
         h = smin(h, ellipsoid(p, (s * 0.172, -0.172, 0.822), (0.082, 0.072, 0.066)), 0.05)
     h = smin(h, ellipsoid(p, (0, -0.212, 0.848), (0.118, 0.052, 0.042)), 0.04)
-    return smin(h, ellipsoid(p, (0, -0.190, 0.695), (0.172, 0.082, 0.058)), 0.06)
+    return smin(h, ellipsoid(p, (0, -0.165, 0.682), (0.212, 0.118, 0.092)), 0.06)
 
 
 @cache
@@ -277,9 +278,18 @@ def _on_skin(x, z, depth=0.0):
 
 @cache
 def face_features():
-    """Brows, lower lids and the seam, as tubes laid on the skin:
+    """Brows, lower lids, lips and the seam, as tubes laid on the skin:
     (name, points, radii, fillet, carve?)."""
     features = []
+    # Soft lips round the grin: a thin upper one that overhangs it, a fat
+    # lower one; both thin out into the corners, where the cheeks take over.
+    w = MOUTH_HALF_WIDTH
+    xs = [w * (2 * k / 14 - 1) * 0.96 for k in range(15)]
+    taper = [math.sqrt(max(0.0, 1 - (x / w) ** 2)) for x in xs]
+    features.append(("upper lip", [_on_skin(x, upper_lip(x) + 0.004, 0.006) for x in xs],
+                     [0.008 + 0.012 * t for t in taper], 0.014, False))
+    features.append(("lower lip", [_on_skin(x, lower_lip(x) - 0.004, 0.004) for x in xs],
+                     [0.008 + 0.022 * t for t in taper], 0.018, False))
     for s in (1, -1):
         ex, ey, ez = eye_center(s)
         # A brow arches over each eye, highest at its inner end; its lower edge
@@ -572,23 +582,44 @@ def _joined(name, objects):
 
 
 def build_mouth(pose=None, open_=1.0):
-    """Small round upper teeth hanging from the upper lip, bigger lower teeth
-    standing on the lower one, and a tongue on the floor of the hollow."""
+    """Upper teeth hanging half hidden under the upper lip, small pointed
+    ones at the ends; broader lower teeth packed along the lower lip, a
+    canine at each end; a big tongue on the floor of the hollow. No two
+    teeth quite alike, as in a real mouth."""
     m = pose_matrices(pose or {})["head"]
+    rng = np.random.default_rng(11)
+
+    def row(halves, gap):
+        """Centres along x for teeth of these half widths, `gap` apart."""
+        width = 2 * sum(halves) + gap * (len(halves) - 1)
+        x, centres = -width / 2, []
+        for half in halves:
+            centres.append(x + half)
+            x += 2 * half + gap
+        return centres
+
     upper = []
-    for i, x in enumerate(np.linspace(-0.164, 0.164, 9)):
+    halves = [0.011, 0.016, 0.019, 0.020, 0.020, 0.019, 0.016, 0.011]
+    for i, (x, half) in enumerate(zip(row(halves, 0.007), halves)):
         lip = upper_lip(x)
-        upper.append(_tooth(f"Upper{i}", (x, front(x, lip) + 0.030, lip - 0.007), (0.0145, 0.010, 0.017), 1,
-                            -2.4 * x, taper=0.60))
+        tall = 0.010 + 0.35 * half
+        jitter = 1 + rng.uniform(-0.06, 0.06)
+        upper.append(_tooth(f"Upper{i}", (x, front(x, lip) + 0.034, lip + 0.002), (half, 0.011, tall * jitter), 1,
+                            -2.4 * x + rng.uniform(-0.05, 0.05), taper=0.65 if half < 0.013 else 0.30))
     lower = []
-    for i, x in enumerate(np.linspace(-0.118, 0.118, 7)):
-        z = lower_lip(x, open_) + 0.009
-        lower.append(_tooth(f"Lower{i}", (x, front(x, z) + 0.030, z), (0.0160, 0.011, 0.016), -1, -2.4 * x))
+    halves = [0.017, 0.019, 0.019, 0.019, 0.019, 0.019, 0.017]
+    for i, (x, half) in enumerate(zip(row(halves, 0.003), halves)):
+        canine = i in (0, len(halves) - 1)
+        z = lower_lip(x, open_) + 0.008
+        jitter = 1 + rng.uniform(-0.06, 0.06)
+        lower.append(_tooth(f"Lower{i}", (x, front(x, z) + 0.032, z + (0.004 if canine else 0)),
+                            (half, 0.012, (0.022 if canine else 0.017) * jitter), -1,
+                            -2.4 * x + rng.uniform(-0.05, 0.05), taper=0.50 if canine else 0.15))
     bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=1)
     tongue = bpy.context.active_object
-    tongue.scale = (0.125, 0.072, 0.030)
-    z = lower_lip(0, open_) + 0.030
-    tongue.location = (0, front(0, z) + 0.085, z)
+    tongue.scale = (0.135, 0.085, 0.036)
+    z = lower_lip(0, open_) + 0.026
+    tongue.location = (0, front(0, z) + 0.100, z)
     parts = {"TeethUpper": _joined("TeethUpper", upper), "TeethLower": _joined("TeethLower", lower),
              "Tongue": _joined("Tongue", [tongue])}
     for obj in parts.values():
@@ -610,7 +641,7 @@ def surface_regions(body, open_=1.0):
     mouth = _mouth(ph, open_) * HEAD_SCALE
     inside = np.clip(1 - mouth / 0.004, 0, 1)
     sole = (z < 0.003).astype(np.float32)
-    fur = np.clip((mouth - 0.010) / 0.03, 0, 1)
+    fur = np.clip((mouth - 0.004) / 0.02, 0, 1)
     fur = np.minimum(fur, 1 - np.clip((0.010 - z) / 0.006, 0, 1))
     # The face: the front of the head, between the brows and the chin.
     face = ellipsoid(ph, (0, -0.25, 0.83), (0.26, 0.10, 0.22))
