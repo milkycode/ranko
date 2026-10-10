@@ -1,12 +1,13 @@
-"""Renders Ranko's body in grey-blue clay, to judge its shape.
+"""Renders Ranko, rigged and posed, to judge his shape and look.
 
     blender -b --factory-startup -P blender/preview.py -- [--clay|--look|--draft|--fur] <out_dir> [pose:view ...]
 
 Each pose:view is one PNG, <out_dir>/<finish>-<pose>-<view>.png, on a clear
 background so blender/fit.py can lay its outline over a reference's. The
-poses are the references' (`stand` is cr714zvnmpglrw9, `wave` is
-Ranko_back), the views orthographic from the front, back and sides, plus a
-three-quarter view through a long lens.
+poses are the references' (`stand` is cr714zvnmpglrw9, `hello` is
+n5ocru92jcaa3qe, `wave` is Ranko_back), the views orthographic from the
+front, back and sides, plus a three-quarter view through a long lens. He is
+built once and posed for each picture.
 """
 
 import math
@@ -17,26 +18,39 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import clips  # noqa: E402
 import look  # noqa: E402
-import model  # noqa: E402
+import rig  # noqa: E402
 
 deg = math.radians
 
+# Poses on the rig, from its rest pose with the arms out and down at 60°.
+ARMS_DOWN = {
+    "upper_arm.L": (deg(4), deg(35), 0), "forearm.L": (deg(-10), deg(-6), 0), "hand.L": (0, deg(4), deg(-80)),
+    "upper_arm.R": (deg(4), deg(-35), 0), "forearm.R": (deg(-10), deg(6), 0), "hand.R": (0, deg(-4), deg(80)),
+}
 POSES = {
     "rest": {},
-    # Arms hanging close at the sides, hands by the hips.
-    "stand": {
-        "upper_arm.L": (deg(4), deg(14), 0), "forearm.L": (deg(4), deg(20), 0), "hand.L": (0, deg(4), deg(-80)),
-        "upper_arm.R": (deg(4), deg(-14), 0), "forearm.R": (deg(4), deg(-20), 0), "hand.R": (0, deg(-4), deg(80)),
-    },
+    # Arms hanging at the sides, hands by the hips.
+    "stand": ARMS_DOWN,
     # His right arm up and out, palm to the front: the wave.
     "hello": {
-        "upper_arm.R": (deg(-5), deg(70), deg(-12)), "forearm.R": (0, deg(45), 0), "hand.R": (0, deg(5), 0),
-        "upper_arm.L": (deg(4), deg(14), 0), "forearm.L": (deg(4), deg(20), 0), "hand.L": (0, deg(4), deg(-80)),
+        **ARMS_DOWN,
+        "upper_arm.R": (deg(-5), deg(65), deg(-12)), "forearm.R": (0, deg(45), 0), "hand.R": (0, deg(5), 0),
     },
     "wave": {
-        "upper_arm.R": (0, deg(92), 0), "forearm.R": (0, deg(20), 0),
-        "upper_arm.L": (deg(4), deg(14), 0), "forearm.L": (deg(4), deg(20), 0), "hand.L": (0, deg(4), deg(-80)),
+        **ARMS_DOWN,
+        "upper_arm.R": (deg(-5), deg(65), deg(-12)), "forearm.R": (0, deg(45), 0), "hand.R": (0, deg(5), 0),
+    },
+    # Everything bent at once, to see how the skin and fur follow.
+    "test": {
+        "upper_arm.L": (0, deg(-60), 0), "forearm.L": (deg(-40), 0, 0),
+        "index.L": (deg(-50), 0, 0), "middle.L": (deg(-50), 0, 0), "ring.L": (deg(-50), 0, 0),
+        "upper_arm.R": (deg(-30), deg(-40), 0), "forearm.R": (deg(-70), 0, 0),
+        "head": (deg(8), deg(-12), deg(20)), "thigh.L": (deg(-35), 0, 0), "tail.1": (0, 0, deg(-35)),
+        "tail.2": (0, 0, deg(-20)), "jaw": (deg(12), 0, 0), "brow.L": (deg(-15), 0, 0),
+        "lid.R": (deg(95), 0, 0), "lid_low.R": (deg(-55), 0, 0), "lid.L": (deg(45), 0, 0),
+        "eye.L": (0, 0, deg(20)), "eye.R": (0, 0, deg(20)),
     },
 }
 
@@ -53,18 +67,10 @@ VIEWS = {
     "face-side": ((1, 0, 0), (0, -0.1, 0.87), 0.66),
     "feet": ((-0.25, -1, 0.35), (0, -0.05, 0.10), 0.70),
     "hand": ((-0.3, -1, 0.1), (-0.40, -0.05, 0.95), 0.42),
+    "hand-down": ((0.2, -1, 0.1), (0.36, -0.05, 0.36), 0.40),
 }
 CENTER = Vector((0, 0, 0.53))
 SIZE = 640
-
-
-def clay(name, color, roughness=0.55, coat=0.0):
-    mat = bpy.data.materials.new(name)
-    bsdf = mat.node_tree.nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = (*color, 1)
-    bsdf.inputs["Roughness"].default_value = roughness
-    bsdf.inputs["Coat Weight"].default_value = coat
-    return mat
 
 
 def setup_render():
@@ -107,22 +113,6 @@ def camera(view):
     return obj
 
 
-def build(pose_name, finish):
-    """Ranko in a pose: `clay`, `look` (materials, no fur), `draft` (thin
-    fur) or `fur`."""
-    model.clear_scene()
-    pose = POSES[pose_name]
-    parts = {"body": model.build_body(pose), "eyes": model.build_eyes(pose), "mouth": model.build_mouth(pose)}
-    if finish == "clay":
-        parts["body"].data.materials.append(clay("Clay", (0.16, 0.22, 0.60)))
-        white = clay("White", (0.9, 0.9, 0.9), roughness=0.2, coat=1.0)
-        for obj in [*parts["eyes"], *parts["mouth"].values()]:
-            obj.data.materials.append(white)
-    else:
-        look.dress(parts, fur=finish in ("fur", "draft"), draft=finish == "draft")
-    look.lights(parts["eyes"])
-
-
 def main():
     args = sys.argv[sys.argv.index("--") + 1:]
     finish = "clay"
@@ -133,12 +123,13 @@ def main():
     setup_render()
     if finish in ("fur", "draft"):
         bpy.context.scene.cycles.samples = 64 if finish == "fur" else 32
-    built = None
+    parts = rig.build(finish, draft=finish == "draft")
+    look.lights(parts["eyes"], lids=parts["lids"])
     for spec in specs:
         pose_name, view = spec.split(":")
-        if pose_name != built:
-            build(pose_name, finish)
-            built = pose_name
+        # A pose by name, or a clip's frame as clip.frame.
+        clip, _, frame = pose_name.partition(".")
+        rig.pose(parts, clips.pose_at(clip, int(frame)) if frame else POSES[pose_name])
         cam = camera(view)
         bpy.context.scene.render.filepath = os.path.join(out_dir, f"{finish}-{pose_name}-{view}.png")
         bpy.ops.render.render(write_still=True)

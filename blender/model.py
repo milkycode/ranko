@@ -109,7 +109,7 @@ def smax(a, b, k):
 
 # --- The skeleton -------------------------------------------------------------
 
-def _arm(side, shoulder, out_deg=45.0):
+def _arm(side, shoulder, out_deg=60.0):
     """Elbow, wrist and knuckles of an arm hanging out at `out_deg` from
     vertical, swung a little forward."""
     out = math.radians(out_deg)
@@ -201,7 +201,6 @@ def _upper_bones():
         Bone("hips", "root", (0, 0.02, 0.20), (0, 0.02, 0.44)),
         Bone("chest", "hips", (0, 0.02, 0.44), (0, 0.0, 0.64)),
         Bone("head", "chest", (0, 0.0, 0.62), (0, 0.0, 1.03)),
-        Bone("jaw", "head", (0, 0.02, 0.74), (0, -0.20, 0.66)),
     ]
     for side, s in (("L", 1), ("R", -1)):
         shoulder = SHOULDER if s > 0 else _mirror(SHOULDER)
@@ -372,12 +371,16 @@ def _head(p, mouth_open):
 
 # --- Hands and feet -------------------------------------------------------------
 
-def _hand(p_hand, digit_points, side):
+PALM = (0.068, 0.074, 0.038)
+
+
+def _hand(p_hand, digit_points, side, keep):
     """Palm and digits: `digit_points(name)` gives the points in that digit's frame."""
     h = hand(side)
-    d = ellipsoid(p_hand, h.palm, (0.068, 0.074, 0.038), h.basis)
+    tag = "L" if side > 0 else "R"
+    d = keep(f"hand.{tag}", ellipsoid(p_hand, h.palm, PALM, h.basis))
     for name, base, tip, rb, rt in h.digits:
-        d = smin(d, round_cone(digit_points(name), base, tip, rb, rt), 0.005)
+        d = smin(d, keep(f"{name}.{tag}", round_cone(digit_points(name), base, tip, rb, rt)), 0.005)
     return d
 
 
@@ -394,40 +397,49 @@ def _foot(p, side):
 
 # --- Ranko ------------------------------------------------------------------
 
-def field(at, mouth_open=1.0):
+def field(at, mouth_open=1.0, parts=None):
     """Ranko's signed distance: `at(bone)` gives the sample points in that
-    bone's rest frame, so the same shapes build any pose."""
+    bone's rest frame, so the same shapes build any pose. Given a dict as
+    `parts`, each bone's own shapes go into it too, by bone: what each bone
+    carries, from which the rig weighs the skin."""
+    def keep(bone, d):
+        if parts is not None:
+            parts[bone] = d
+        return d
+
     hips, chest = body_space(at("hips")), body_space(at("chest"))
 
     # A belly, widest and fullest low down where it bulges forward, under a
     # narrower chest, held up off the ground by two short legs.
     d = ellipsoid(hips, (0, 0.020, 0.350), (0.312, 0.270, 0.220))
     d = smin(d, ellipsoid(hips, (0, -0.045, 0.318), (0.258, 0.232, 0.172)), 0.06)
-    d = smin(d, ellipsoid(hips, (0, 0.040, 0.250), (0.210, 0.180, 0.090)), 0.08)
-    d = smin(d, ellipsoid(chest, (0, 0.025, 0.510), (0.225, 0.205, 0.150)), 0.12)
+    d = keep("hips", smin(d, ellipsoid(hips, (0, 0.040, 0.250), (0.210, 0.180, 0.090)), 0.08))
+    d = smin(d, keep("chest", ellipsoid(chest, (0, 0.025, 0.510), (0.225, 0.205, 0.150))), 0.12)
     # A crease under the chin, but the back of the head flows into the back.
     head = body_space(at("head"))
     neck = 0.03 + 0.09 * np.clip((head[1] + 0.02) / 0.20, 0, 1)
-    d = smin(d, _head(head_space(head), mouth_open) * HEAD_SCALE, neck)
+    d = smin(d, keep("head", _head(head_space(head), mouth_open) * HEAD_SCALE), neck)
 
     for side, s in (("L", 1), ("R", -1)):
         shoulder = SHOULDER if s > 0 else _mirror(SHOULDER)
         elbow, wrist = (ELBOW_L, WRIST_L) if s > 0 else (ELBOW_R, WRIST_R)
-        arm = round_cone(body_space(at(f"upper_arm.{side}")), shoulder, elbow, 0.085, 0.078)
-        arm = smin(arm, round_cone(body_space(at(f"forearm.{side}")), elbow, wrist, 0.076, 0.064), 0.03)
-        arm = smin(arm, _hand(body_space(at(f"hand.{side}")), lambda name: body_space(at(f"{name}.{side}")), s), 0.03)
+        arm = keep(f"upper_arm.{side}", round_cone(body_space(at(f"upper_arm.{side}")), shoulder, elbow, 0.085, 0.078))
+        arm = smin(arm, keep(f"forearm.{side}",
+                             round_cone(body_space(at(f"forearm.{side}")), elbow, wrist, 0.076, 0.064)), 0.03)
+        arm = smin(arm, _hand(body_space(at(f"hand.{side}")), lambda name: body_space(at(f"{name}.{side}")), s,
+                              keep), 0.03)
         d = smin(d, arm, 0.05)
 
         hip, ankle = (_lifted(HIP), ANKLE) if s > 0 else (_lifted(_mirror(HIP)), _mirror(ANKLE))
-        leg = round_cone(at(f"thigh.{side}"), hip, ankle, 0.106, 0.090)
-        leg = smin(leg, _foot(at(f"foot.{side}"), s), 0.04)
+        leg = keep(f"thigh.{side}", round_cone(at(f"thigh.{side}"), hip, ankle, 0.106, 0.090))
+        leg = smin(leg, keep(f"foot.{side}", _foot(at(f"foot.{side}"), s)), 0.04)
         # Nothing of the leg below the sole.
         leg = smax(leg, -at(f"foot.{side}")[2], 0.006)
         d = smin(d, leg, 0.05)
 
     tail = None
     for i, (points, radii) in enumerate(tail_curve()):
-        seg = tube(body_space(at(f"tail.{i + 1}")), points, radii)
+        seg = keep(f"tail.{i + 1}", tube(body_space(at(f"tail.{i + 1}")), points, radii))
         tail = seg if tail is None else np.minimum(tail, seg)
     return smin(d, tail, 0.04)
 
@@ -685,10 +697,10 @@ def surface_regions(body, open_=1.0):
         fur = np.minimum(fur, 0.30 + 0.70 * np.clip((eye - 0.002) / 0.04, 0, 1))
         fur = np.where(eye < 0.002, 0, fur)
         h = hand(s)
-        palm = ellipsoid(pb, h.palm, (0.068, 0.074, 0.038), h.basis)
+        palm = ellipsoid(pb, h.palm, PALM, h.basis)
         for _, base, tip, rb, rt in h.digits:
             palm = np.minimum(palm, round_cone(pb, base, tip, rb, rt))
-        fur = np.minimum(fur, 0.15 + 0.85 * np.clip(palm / 0.03, 0, 1))
+        fur = np.minimum(fur, 0.45 + 0.55 * np.clip(palm / 0.03, 0, 1))
         foot = ellipsoid(p, (s * FOOT_X, -0.06, 0.07), (0.15, 0.20, 0.10))
         fur = np.minimum(fur, 0.55 + 0.45 * np.clip(foot / 0.03, 0, 1))
     return inside, lip, sole, fur
