@@ -290,9 +290,9 @@ def face_features():
     xs = [w * (2 * k / 14 - 1) * 0.96 for k in range(15)]
     taper = [math.sqrt(max(0.0, 1 - (x / w) ** 2)) for x in xs]
     features.append(("upper lip", [_on_skin(x, upper_lip(x) + 0.004, 0.006) for x in xs],
-                     [0.008 + 0.012 * t for t in taper], 0.014, False))
+                     [0.010 + 0.014 * t for t in taper], 0.014, False))
     features.append(("lower lip", [_on_skin(x, lower_lip(x) - 0.004, 0.004) for x in xs],
-                     [0.008 + 0.022 * t for t in taper], 0.018, False))
+                     [0.010 + 0.026 * t for t in taper], 0.018, False))
     for s in (1, -1):
         ex, ey, ez = eye_center(s)
         # A brow arches over each eye, highest at its inner end; its lower edge
@@ -366,7 +366,8 @@ def _head(p, mouth_open):
     for name, points, radii, fillet, carve in face_features():
         if carve:
             h = smax(h, -tube(p, points, radii), fillet)
-    return smax(h, -_mouth(p, mouth_open), 0.010)
+    # A wide round edge: the lips roll in over it, as lips do.
+    return smax(h, -_mouth(p, mouth_open), 0.024)
 
 
 # --- Hands and feet -------------------------------------------------------------
@@ -636,7 +637,8 @@ def build_mouth(pose=None, open_=1.0):
 
 def surface_regions(body, open_=1.0):
     """Per vertex of the rest-pose body: how deep in the mouth it is (0 on
-    the skin, 1 inside), whether it is sole (bare pad), and how much fur
+    the skin, 1 inside), whether it is bare lip, whether it is sole (bare
+    pad), and how much fur
     grows there: none in the mouth, under the eyes or on the soles; short on
     the lids, the face and the hands."""
     co = np.empty(len(body.data.vertices) * 3, dtype=np.float32)
@@ -647,8 +649,10 @@ def surface_regions(body, open_=1.0):
     ph = head_space(pb)
     mouth = _mouth(ph, open_) * HEAD_SCALE
     inside = np.clip(1 - mouth / 0.004, 0, 1)
+    # The bare lip rolling into the mouth, between the fur and the hollow.
+    lip = ((mouth >= 0.002) & (mouth < 0.016)).astype(np.float32)
     sole = (z < 0.003).astype(np.float32)
-    fur = np.clip((mouth - 0.004) / 0.02, 0, 1)
+    fur = np.clip((mouth - 0.012) / 0.02, 0, 1)
     fur = np.minimum(fur, 1 - np.clip((0.010 - z) / 0.006, 0, 1))
     # The face: the front of the head, between the brows and the chin.
     face = ellipsoid(ph, (0, -0.25, 0.83), (0.26, 0.10, 0.22))
@@ -670,7 +674,7 @@ def surface_regions(body, open_=1.0):
         fur = np.minimum(fur, 0.15 + 0.85 * np.clip(palm / 0.03, 0, 1))
         foot = ellipsoid(p, (s * FOOT_X, -0.06, 0.07), (0.15, 0.20, 0.10))
         fur = np.minimum(fur, 0.55 + 0.45 * np.clip(foot / 0.03, 0, 1))
-    return inside, sole, fur
+    return inside, lip, sole, fur
 
 
 def surface_tone(body, open_=1.0):
@@ -686,7 +690,7 @@ def surface_tone(body, open_=1.0):
         return np.clip(1 - np.maximum(distance, 0) / reach, 0, 1)
 
     ph = head_space(body_space(p))
-    tone = 1 - 0.35 * near(_mouth(ph, open_) - 0.004, 0.025)
+    tone = 1 - 0.25 * near(_mouth(ph, open_) - 0.016, 0.02)
     for s in (1, -1):
         tone *= 1 - 0.45 * near(sphere(ph, eye_center(s), EYE_RADIUS) - 0.004, 0.022)
         x = s * FOOT_X

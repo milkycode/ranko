@@ -200,10 +200,11 @@ def dress(parts, fur=True, draft=False):
     body.data.materials.append(plain("Mouth", (0.030, 0.022, 0.075), roughness=0.55))
 
     body.data.materials.append(plain("Pad", (0.05, 0.08, 0.36), roughness=0.55, subsurface=0.1))
+    body.data.materials.append(plain("Lip", (0.050, 0.080, 0.340), roughness=0.50, subsurface=0.15))
 
-    inside, sole, density = model.surface_regions(body)
-    # Faces in the hollow of the mouth get its dark lining, the soles their
-    # bare pads; the rest, skin.
+    inside, lip, sole, density = model.surface_regions(body)
+    # Faces in the hollow of the mouth get its dark lining, the lips their
+    # bare blue skin, the soles their bare pads; the rest, skin.
     me = body.data
     corners = np.empty(len(me.loops), dtype=np.int32)
     me.loops.foreach_get("vertex_index", corners)
@@ -212,7 +213,8 @@ def dress(parts, fur=True, draft=False):
     sizes = np.diff(np.append(starts, len(corners)))
     depth = np.add.reduceat(inside[corners], starts) / sizes
     pad = np.add.reduceat(sole[corners], starts) / sizes
-    index = np.where(depth > 0.5, 2, np.where(pad > 0.5, 3, 1))
+    bare = np.add.reduceat(lip[corners], starts) / sizes
+    index = np.where(depth > 0.5, 2, np.where(bare > 0.5, 4, np.where(pad > 0.5, 3, 1)))
     me.polygons.foreach_set("material_index", index.astype(np.int32))
     # Weights in steps of 1/64, a call per step rather than per vertex.
     group = body.vertex_groups.new(name="fur")
