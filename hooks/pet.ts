@@ -10,11 +10,20 @@
 export const FEATURES = ['drag', 'pats', 'toolProps', 'miniRankos', 'stuffing', 'blush', 'fidgets', 'sounds'] as const
 export type Feature = (typeof FEATURES)[number]
 
+export type ClipInfo = {
+  frames: number
+  loop: boolean
+  /** How the clip leaves him: `stand` (the default), `sit` or `cushion`. */
+  posture?: string
+  /** For a clip that takes him from one posture to another, the two. */
+  transition?: [string, string]
+}
+
 export type Manifest = {
   fps: number
   columns: number
   rows: number
-  clips: Record<string, { frames: number; loop: boolean }>
+  clips: Record<string, ClipInfo>
 }
 
 /** Whether parsed JSON is a manifest this mod can play: a frames folder from
@@ -104,6 +113,11 @@ export class Pet {
   private serial = 0
   private playing = ''
   private nextFidgetMs: number | null = null
+  // How he is now, and the transition under way to how the next clip has
+  // him: the clips are baked standing, sitting or on his cushion, and going
+  // straight from one to another would be a jump.
+  private posture = 'stand'
+  private transition: { clip: string; to: string } | null = null
 
   constructor(
     private readonly manifest: Manifest,
@@ -120,6 +134,23 @@ export class Pet {
   /** Every clip there are frames for, the names `/ranko <reaction>` takes. */
   clipNames() {
     return Object.keys(this.manifest.clips)
+  }
+
+  postureOf(clip: string) {
+    return this.manifest.clips[clip]?.posture ?? 'stand'
+  }
+
+  /** The clip that takes him from one posture toward another, if one is baked:
+   * straight there, or else up onto his feet first. */
+  private transitionFor(from: string, to: string) {
+    const find = (a: string, b: string) =>
+      Object.entries(this.manifest.clips).find(([, c]) => c.transition?.[0] === a && c.transition?.[1] === b)?.[0]
+    const direct = find(from, to)
+    if (direct) {
+      return { clip: direct, to }
+    }
+    const up = from !== 'stand' && to !== 'stand' ? find(from, 'stand') : undefined
+    return up ? { clip: up, to: 'stand' } : null
   }
 
   framesOf(clip: string) {
@@ -203,6 +234,24 @@ export class Pet {
     if (!this.has(clip)) {
       clip = this.has(moodOf(clip)) ? moodOf(clip) : 'idle'
     }
+
+    // A clip in another posture waits for the transition there; being held
+    // lifts him straight off whatever he sat on.
+    if (key === 'held') {
+      this.transition = null
+    } else if (!this.transition && !this.manifest.clips[clip]?.transition) {
+      const want = this.postureOf(clip)
+      if (want !== this.posture) {
+        this.transition = this.transitionFor(this.posture, want)
+      }
+    }
+    if (this.transition) {
+      key = `transition:${this.transition.clip}`
+      clip = this.transition.clip
+    } else {
+      this.posture = this.postureOf(clip)
+    }
+
     // Variants of one mood share a length, so switching between them (idle to
     // idle-stuffed) carries on from the same frame instead of jumping back.
     const isSameMood = key === this.playing && this.framesOf(clip) === this.framesOf(this.clip)
@@ -221,6 +270,11 @@ export class Pet {
     this.frame += 1
     if (this.oneOff && this.playing === `once:${this.oneOff.serial}` && this.frame >= this.oneOff.length) {
       this.oneOff = null
+    }
+    const { transition } = this
+    if (transition && this.playing === `transition:${transition.clip}` && this.frame >= this.framesOf(transition.clip)) {
+      this.posture = transition.to
+      this.transition = null
     }
 
     let isRedrawn = false

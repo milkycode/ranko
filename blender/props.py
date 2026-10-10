@@ -117,15 +117,19 @@ def build(parts, rig, to_bone):
     screen = look.plain("Screen", (0.05, 0.10, 0.25), roughness=0.15, coat=0.8)
     screen.node_tree.nodes["Principled BSDF"].inputs["Emission Color"].default_value = (0.35, 0.55, 1.0, 1)
     screen.node_tree.nodes["Principled BSDF"].inputs["Emission Strength"].default_value = 0.8
+    # The keys on the side toward him (+Y); the hinge at the far edge, the lid
+    # standing up there, its screen facing him and its back to the camera.
     laptop = _group("Laptop", (0, -0.36, 0.13))
     _rounded_box("LaptopBase", (0.30, 0.20, 0.014), 0.006, metal, laptop)
-    _rounded_box("LaptopKeys", (0.26, 0.11, 0.004), 0.0015, keys, laptop, (0, -0.02, 0.008))
+    _rounded_box("LaptopKeys", (0.26, 0.11, 0.004), 0.0015, keys, laptop, (0, 0.02, 0.008))
     lid = _group("LaptopHinge")
     lid.parent = laptop
-    lid.location = (0, 0.10, 0.007)
-    lid.rotation_euler = (deg(-105), 0, 0)
-    _rounded_box("LaptopLid", (0.30, 0.20, 0.010), 0.005, metal, lid, (0, -0.10, 0.0))
-    _rounded_box("LaptopScreen", (0.26, 0.16, 0.002), 0.0008, screen, lid, (0, -0.10, 0.0055))
+    lid.location = (0, -0.10, 0.007)
+    # Shut, the lid lies over the keys with its screen down; it opens by
+    # turning up about the hinge.
+    lid.rotation_euler = (deg(105), 0, 0)
+    _rounded_box("LaptopLid", (0.30, 0.20, 0.010), 0.005, metal, lid, (0, 0.10, 0.0))
+    _rounded_box("LaptopScreen", (0.26, 0.16, 0.002), 0.0008, screen, lid, (0, 0.10, -0.0055))
     to_bone(laptop, rig, "root")
     props["laptop"] = laptop
 

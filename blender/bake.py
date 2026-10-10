@@ -104,12 +104,21 @@ def set_layer(parts, layer):
     bpy.context.scene.cycles.samples = LAYERS[layer]
 
 
+def _entry(clip):
+    entry = {"frames": clip.frames, "loop": clip.loop}
+    if clip.posture != "stand":
+        entry["posture"] = clip.posture
+    if clip.transition:
+        entry["transition"] = list(clip.transition)
+    return entry
+
+
 def write_manifest(out_dir):
     manifest = {
         "fps": clips.FPS,
         "columns": COLUMNS,
         "rows": ROWS,
-        "clips": {name: {"frames": c.frames, "loop": c.loop} for name, c in clips.CLIPS.items()},
+        "clips": {name: _entry(c) for name, c in clips.CLIPS.items()},
     }
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "manifest.json"), "w") as f:

@@ -127,6 +127,50 @@ describe('register', () => {
     await band.unmount()
   })
 
+  test('he sits down to work and stands up when the turn is done', async ($, on) => {
+    const base = JSON.parse(MANIFEST)
+    const seated = JSON.stringify({
+      ...base,
+      clips: {
+        ...base.clips,
+        working: { frames: 24, loop: true, posture: 'sit' },
+        sleepy: { frames: 64, loop: true, posture: 'cushion' },
+        'sit-down': { frames: 16, loop: false, posture: 'sit', transition: ['stand', 'sit'] },
+        'stand-up': { frames: 16, loop: false, transition: ['sit', 'stand'] },
+        'doze-off': { frames: 30, loop: false, posture: 'cushion', transition: ['stand', 'cushion'] },
+        'wake-up': { frames: 24, loop: false, transition: ['cushion', 'stand'] },
+      },
+    })
+    const clock = answerTheWorld(on, 10, seated)
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    expect(await shownClip(band)).toBe('sit-down')
+    await clock.advance(800)
+    expect(await shownClip(band)).toBe('working')
+
+    // A quick answer: no jump, just back onto his feet.
+    await complete($, 't1', 1000)
+    expect(await shownClip(band)).toBe('stand-up')
+    await clock.advance(800)
+    expect(await shownClip(band)).toBe('idle')
+
+    // Left alone two minutes he dozes off on his cushion; a turn wakes him,
+    // and he sits down to it.
+    await clock.advance(2 * 60 * 1000 + 100)
+    expect(await shownClip(band)).toBe('doze-off')
+    await clock.advance(1500)
+    expect(await shownClip(band)).toBe('sleepy')
+    await $.turn.start({ text: 'wake up', turnId: 't2' })
+    expect(await shownClip(band)).toBe('wake-up')
+    await clock.advance(1100)
+    expect(await shownClip(band)).toBe('sit-down')
+    await clock.advance(800)
+    expect(await shownClip(band)).toBe('working')
+    await band.unmount()
+  })
+
   test('a narrow band or a survey keeps the pet out of the way', async ($, on) => {
     answerTheWorld(on)
     await $.session.start(START)

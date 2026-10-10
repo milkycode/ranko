@@ -23,16 +23,26 @@ class Clip:
     motion: str
     frames: int
     loop: bool
+    # How he is when the clip ends: standing, sitting on the floor, or on his
+    # cushion. The mod plays a transition when the next clip's differs.
+    posture: str = "stand"
+    # For a transition, the postures it goes from and to.
+    transition: tuple = None
 
 
 CLIPS = {
     "idle": Clip("idle", 48, True),
     "hello": Clip("hello", 56, False),
-    "working": Clip("working", 24, True),
+    "working": Clip("working", 24, True, posture="sit"),
     "happy": Clip("happy", 32, False),
     "oops": Clip("oops", 36, False),
-    "sleepy": Clip("sleepy", 64, True),
+    "sleepy": Clip("sleepy", 64, True, posture="cushion"),
+    "sit-down": Clip("sit_down", 16, False, posture="sit", transition=("stand", "sit")),
+    "stand-up": Clip("stand_up", 16, False, posture="stand", transition=("sit", "stand")),
+    "doze-off": Clip("doze_off", 30, False, posture="cushion", transition=("stand", "cushion")),
+    "wake-up": Clip("wake_up", 24, False, posture="stand", transition=("cushion", "stand")),
 }
+PROPS = ("sweat", "laptop", "cushion", "z1", "z2", "z3")
 
 # Arms hanging loose at his sides: out just enough to clear the belly, the
 # elbows a little bent so the forearms follow its curve, palms in.
@@ -326,13 +336,100 @@ def sleepy(t, frame):
     return p
 
 
+def _default(key):
+    """What a pose key is when a pose leaves it out."""
+    name, _, what = key.partition("@")
+    if what == "":
+        return (0.0, 0.0, 0.0)
+    if what == "mouth":
+        return 1.0
+    if what == "scale":
+        return 0.0 if name in PROPS else (1.0, 1.0, 1.0)
+    if what == "offset":
+        return (0.0, 0.0, 0.0)
+    if what == "show":
+        return False
+    return 0.0
+
+
+def mix(a, b, u):
+    """A pose `u` of the way from `a` to `b`, every key of either moving. A
+    prop shown in only one of them grows from nothing, or shrinks to it."""
+    def sized(pose):
+        """Every prop's size made explicit: as set, 1 if shown, 0 if not."""
+        pose = Pose(pose)
+        for name in PROPS:
+            shown = bool(pose.get(f"{name}@show"))
+            pose[f"{name}@scale"] = pose.get(f"{name}@scale", 1.0) if shown else 0.0
+        return pose
+
+    a, b = sized(a), sized(b)
+    out = Pose()
+    for key in set(a) | set(b):
+        if key.endswith("@show"):
+            continue
+        name, _, what = key.partition("@")
+        if name in PROPS and what == "offset" and (key not in a or key not in b):
+            # A prop coming or going stays where the pose that shows it puts it.
+            out[key] = a.get(key, b.get(key))
+            continue
+        old, new = a.get(key, _default(key)), b.get(key, _default(key))
+        out[key] = tuple(lerp(o, n, u) for o, n in zip(old, new)) if isinstance(old, tuple) else lerp(old, new, u)
+    for name in PROPS:
+        if out.get(f"{name}@scale", 0.0) > 0.01:
+            out[f"{name}@show"] = True
+    return out
+
+
+def sit_down(t, frame):
+    """From standing to sitting at his laptop: he sinks, leaning back a
+    little as his legs swing out, and the laptop pops up on his lap."""
+    u = ease(t)
+    p = mix(idle(0, 0), working(0, 0), u)
+    p["@offset"] = (0, 0, -SIT_DROP * ease(t * 1.15))
+    p.turn("chest", x=-9 * math.sin(math.pi * t))
+    pop = ease((t - 0.55) / 0.35)
+    p["laptop@scale"] = pop * (1 + 0.12 * math.sin(math.pi * pop))
+    p["laptop@show"] = pop > 0.01
+    return p
+
+
+def stand_up(t, frame):
+    """From his laptop back to his feet: the laptop goes, he pushes up."""
+    p = sit_down(1 - t, frame)
+    p["@offset"] = (0, 0, p["@offset"][2] + 0.03 * math.sin(math.pi * t))
+    return p
+
+
+def doze_off(t, frame):
+    """Yawns with a big stretch while his cushion appears, and settles onto
+    it, eyes shut."""
+    u = ease((t - 0.35) / 0.65)
+    p = mix(idle(0, 0), sleepy(0, 0), u)
+    yawn = math.sin(math.pi * min(1.0, t / 0.6))
+    p.blend({k: v for k, v in CHEER.items() if "@" not in k}, 0.6 * yawn * (1 - u))
+    p["@mouth"] = max(p.get("@mouth", 1.0), yawn)
+    p.turn("jaw", x=10 * yawn)
+    p.turn("chest", x=-8 * yawn)
+    p.lids(max(ease(t / 0.3), u))
+    p["cushion@scale"] = ease(t / 0.4)
+    p["cushion@show"] = p["cushion@scale"] > 0.01
+    return p
+
+
+def wake_up(t, frame):
+    """Opens his eyes, stretches up off the cushion, which goes."""
+    return doze_off(1 - t, frame)
+
+
 # Where the laptop sits on his lap, as an offset from where it is built, and
 # where its keys are then, in the world.
 LAPTOP = (0, -0.06, 0.27)
-KEYS = (0, -0.42, 0.25 + 0.008)
+KEYS = (0, -0.40, 0.25 + 0.008)
 CUSHION = 0.13  # its height
 
-MOTIONS = {"idle": idle, "hello": hello, "working": working, "happy": happy, "oops": oops, "sleepy": sleepy}
+MOTIONS = {"idle": idle, "hello": hello, "working": working, "happy": happy, "oops": oops, "sleepy": sleepy,
+           "sit_down": sit_down, "stand_up": stand_up, "doze_off": doze_off, "wake_up": wake_up}
 
 
 def pose_at(clip_name, frame):
