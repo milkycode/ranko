@@ -85,8 +85,9 @@ WSL). There is no `.blend` to keep: every run builds him from the scripts in
    joint bent to catch bad folds. *Done.*
 3. **Port the mod.** Renames, 12×6, `hello` on session start, tests pass.
    *Done.*
-4. **MVP clips.** `idle` and `hello` baked; next `working`, `happy`, `oops`,
-   `sleepy`.
+4. **MVP clips.** `idle`, `hello`, `working` (sitting with a laptop),
+   `happy`, `oops` (sweat drop) and `sleepy` (on a cushion, z's rising).
+   Props hang from bones and show when a pose names them (`props.py`).
 5. **The rest.** The remaining clips, tool props, stuffing sizes.
 6. **Publish.** Marketplace, README, demo GIF, a nod to Rankello.
 

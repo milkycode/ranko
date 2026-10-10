@@ -10,6 +10,22 @@
     "hello": {
       "frames": 56,
       "loop": false
+    },
+    "working": {
+      "frames": 24,
+      "loop": true
+    },
+    "happy": {
+      "frames": 32,
+      "loop": false
+    },
+    "oops": {
+      "frames": 36,
+      "loop": false
+    },
+    "sleepy": {
+      "frames": 64,
+      "loop": true
     }
   }
 }

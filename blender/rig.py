@@ -25,6 +25,7 @@ from mathutils import Euler, Matrix, Vector
 
 import look
 import model
+import props
 from model import Bone
 
 # How far each kind of bone's pull reaches beyond its own shapes: wide over
@@ -280,6 +281,7 @@ def build(finish="fur", draft=False, strands=None):
     to_bone(parts["mouth"]["TeethLower"], rig, "jaw")
     to_bone(parts["mouth"]["Tongue"], rig, "jaw")
     parts["rig"] = rig
+    parts["props"] = props.build(parts, rig, to_bone)
 
     if finish == "clay":
         look.clay(parts)
@@ -316,6 +318,8 @@ def pose(parts, values):
     world = {}
     for key, value in values.items():
         bone, _, what = key.partition("@")
+        if bone in parts.get("props", {}):
+            continue
         if what == "":
             world[bone] = Euler(value, "XYZ").to_matrix() @ world.get(bone, Matrix.Identity(3))
         elif what in ("curl", "spread"):
@@ -331,6 +335,8 @@ def pose(parts, values):
         bone, _, what = key.partition("@")
         if bone == "":
             bone, what = "root", key[1:]
+        if bone in parts.get("props", {}):
+            continue
         b = rig.data.bones[bone]
         turn = b.matrix_local.to_3x3()
         if what in ("", "curl", "spread", "twist", "mouth"):
@@ -342,6 +348,7 @@ def pose(parts, values):
             rig.pose.bones[bone].scale = (abs(local[0][0]), abs(local[1][1]), abs(local[2][2]))
         else:
             raise ValueError(f"unknown pose key {key}")
+    props.pose(parts.get("props", {}), values)
     # How far open the mouth is: 1 the grin as sculpted, 0 shut in a smile.
     shut = min(1.0, max(0.0, 1.0 - values.get("@mouth", 1.0)))
     for obj in (parts["body"], *parts["mouth"].values()):

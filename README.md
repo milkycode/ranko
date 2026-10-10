@@ -1,9 +1,12 @@
 # Ranko
 
 Ranko, the Rankello monster, lives above the Claude Code prompt and reacts to
-what Claude is doing. He waves hello when a session starts, and breathes,
-blinks and swings his tail while he waits. More reactions are on the way:
-working, celebrating, wobbling, blushing, napping (see [docs/plan.md](docs/plan.md)).
+what Claude is doing. He waves hello when a session starts; breathes, blinks
+and swings his tail while he waits; sits down and types on his laptop while
+Claude works; jumps for joy after a long turn; clutches his head with a sweat
+drop when a tool fails or you interrupt; and dozes off on a cushion, z's
+rising, when left alone. More reactions are on the way (see
+[docs/plan.md](docs/plan.md)).
 
 It is a Claude Code mod: frames baked in Blender, played in the terminal by
 swapping an `Image`'s source with `$.ui.blit`. Terminals with the kitty

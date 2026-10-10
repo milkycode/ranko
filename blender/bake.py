@@ -20,6 +20,7 @@ from mathutils import Vector
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clips  # noqa: E402
 import look  # noqa: E402
+import props  # noqa: E402
 import rig  # noqa: E402
 
 # A square of 12 x 6 cells: about 192 x 192 device pixels in a Retina
@@ -90,7 +91,8 @@ def setup_scene(parts):
     bpy.context.scene.camera = cam
 
     parts["floor"] = floor
-    parts["toy"] = [parts["body"], *parts["eyes"], *parts["lids"], *parts["mouth"].values()]
+    parts["toy"] = [parts["body"], *parts["eyes"], *parts["lids"], *parts["mouth"].values(),
+                    *props.meshes(parts["props"])]
 
 
 def set_layer(parts, layer):
