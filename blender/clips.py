@@ -41,8 +41,12 @@ CLIPS = {
     "stand-up": Clip("stand_up", 16, False, posture="stand", transition=("sit", "stand")),
     "doze-off": Clip("doze_off", 30, False, posture="cushion", transition=("stand", "cushion")),
     "wake-up": Clip("wake_up", 24, False, posture="stand", transition=("cushion", "stand")),
+    "pat": Clip("pat", 28, False),
+    "held": Clip("held", 24, True),
+    "drop": Clip("drop", 16, False),
+    "blush": Clip("blush", 32, False),
 }
-PROPS = ("sweat", "laptop", "cushion", "z1", "z2", "z3")
+PROPS = ("sweat", "laptop", "cushion", "z1", "z2", "z3", "heart1", "heart2", "heart3")
 
 # Arms hanging loose at his sides: out just enough to clear the belly, the
 # elbows a little bent so the forearms follow its curve, palms in.
@@ -422,6 +426,123 @@ def wake_up(t, frame):
     return doze_off(1 - t, frame)
 
 
+def happy_eyes(p, amount):
+    """Eyes squeezed into happy crescents: the lower lids pushed up, the upper
+    ones a little down."""
+    p.lids(0.30 * amount, lower=0.60 * amount)
+
+
+def pat(t, frame):
+    """Squished by the pat, he bounces back pleased, eyes squeezed happy, and
+    three hearts float up off him."""
+    p = Pose(ARMS_DOWN)
+    p.relax_hands()
+    if t < 0.25:
+        squash = 0.14 * ease(t / 0.25)
+        hop = 0.0
+    elif t < 0.55:
+        u = (t - 0.25) / 0.3
+        squash = lerp(0.14, -0.06, ease(u))
+        hop = 0.035 * math.sin(math.pi * u)
+    else:
+        u = (t - 0.55) / 0.45
+        squash = -0.06 * (1 - ease(u))
+        hop = 0.0
+    p["hips@scale"] = (1 + squash / 2, 1 + squash / 2, 1 - squash)
+    p["@offset"] = (0, 0, hop)
+    glee = ease(t / 0.15) * (1 - ease((t - 0.85) / 0.15))
+    p.turn("root", z=5 * math.sin(4 * math.pi * t) * (1 - t))
+    p.turn("upper_arm.L", y=-18 * glee)
+    p.turn("upper_arm.R", y=18 * glee)
+    happy_eyes(p, glee)
+    p["@mouth"] = lerp(0.13, 0.8, glee)
+    for side in "LR":
+        p[f"brow.{side}@offset"] = (0, 0, 0.010 * glee)
+    for i in range(3):
+        u = (t - 0.10 - i * 0.13) / 0.6
+        if 0 < u < 1:
+            p[f"heart{i + 1}@show"] = True
+            p[f"heart{i + 1}@scale"] = math.sin(math.pi * u) * 1.2
+            p[f"heart{i + 1}@offset"] = (0.03 * math.sin(3 * math.pi * u), 0, 0.30 * u)
+    look_at_viewer(p)
+    return p
+
+
+def held(t, frame):
+    """Lifted off the floor and dangling: legs kicking, body swinging, arms
+    up, mouth open in a "wheee"."""
+    swing = math.sin(2 * math.pi * t)
+    p = Pose(ARMS_DOWN)
+    p.relax_hands(curl=10)
+    p["@offset"] = (0, 0, 0.20)
+    p["hips@scale"] = (0.97, 0.97, 1.06)
+    p.turn("root", y=6 * swing)
+    # Arms up and bent, as if lifted under them.
+    p.blend({k: v for k, v in CHEER.items() if "@" not in k}, 0.8)
+    p.turn("forearm.L", y=-25, x=-10)
+    p.turn("forearm.R", y=25, x=-10)
+    p.turn("upper_arm.L", y=-8 * math.sin(4 * math.pi * t))
+    p.turn("upper_arm.R", y=8 * math.sin(4 * math.pi * t + 1))
+    for i, side in enumerate("LR"):
+        p.turn(f"thigh.{side}", x=14 * math.sin(4 * math.pi * t + i * math.pi))
+        p.turn(f"foot.{side}", x=25)
+    for i in range(1, 5):
+        p.turn(f"tail.{i}", z=10 * math.sin(2 * math.pi * t - 0.7 * i), x=6)
+    p["@mouth"] = 0.75
+    for side in "LR":
+        p[f"brow.{side}@offset"] = (0, 0, 0.012)
+    look_at_viewer(p)
+    return p
+
+
+def drop(t, frame):
+    """Set down from a hold: he drops, squashes on landing with his eyes
+    squeezed, and bounces back up."""
+    start = held(0, 0)
+    p = Pose(ARMS_DOWN)
+    p.relax_hands()
+    if t < 0.3:
+        u = t / 0.3
+        p = mix(start, p, 0.3 * u)
+        p["@offset"] = (0, 0, 0.20 * (1 - u * u))
+        squash, eyes = 0.0, 0.0
+    elif t < 0.55:
+        u = (t - 0.3) / 0.25
+        squash, eyes = 0.18 * math.sin(math.pi * u), math.sin(math.pi * u)
+        p["@offset"] = (0, 0, 0)
+    else:
+        u = (t - 0.55) / 0.45
+        squash, eyes = -0.05 * math.sin(math.pi * u) * (1 - u), 0.0
+        p["@offset"] = (0, 0, 0.025 * math.sin(math.pi * u))
+    p["hips@scale"] = (1 + squash / 2, 1 + squash / 2, 1 - squash)
+    p.lids(0.7 * eyes, lower=0.4 * eyes)
+    p["@mouth"] = lerp(0.6, 0.13, ease(t))
+    look_at_viewer(p)
+    return p
+
+
+def blush(t, frame):
+    """Kind words: his cheeks turn pink, he hides his grin behind his hands
+    and sways shyly, eyes squeezed, looking down and away."""
+    b = ease(t / 0.2) if t < 0.2 else (1 - ease((t - 0.82) / 0.18) if t > 0.82 else 1.0)
+    p = Pose(ARMS_DOWN)
+    p.relax_hands(curl=15, together=2)
+    p["@blush"] = b
+    for side, s in (("L", 1), ("R", -1)):
+        x = s * 0.075
+        mouth = rig.from_head((x, model.front(x, 0.74) - 0.03, 0.71))
+        reach(p, side, mouth, pole=(1, 0.2, -0.8), amount=b)
+        p[f"hand.{side}@twist"] = lerp(p[f"hand.{side}@twist"], s * 10, b)
+    p.turn("root", z=6 * math.sin(4 * math.pi * t) * b)
+    p.turn("head", x=6 * b, y=7 * b)
+    for side, s in (("L", 1), ("R", -1)):
+        p.turn(f"eye.{side}", x=8 * b, z=-10 * b)
+        p.turn(f"brow.{side}", y=8 * s * b)
+    p.lids(0.25 * b, lower=0.45 * b)
+    p["@mouth"] = lerp(0.13, 0.45, b)
+    return p
+
+
 # Where the laptop sits on his lap, as an offset from where it is built, and
 # where its keys are then, in the world.
 LAPTOP = (0, -0.06, 0.27)
@@ -429,7 +550,8 @@ KEYS = (0, -0.40, 0.25 + 0.008)
 CUSHION = 0.13  # its height
 
 MOTIONS = {"idle": idle, "hello": hello, "working": working, "happy": happy, "oops": oops, "sleepy": sleepy,
-           "sit_down": sit_down, "stand_up": stand_up, "doze_off": doze_off, "wake_up": wake_up}
+           "sit_down": sit_down, "stand_up": stand_up, "doze_off": doze_off, "wake_up": wake_up,
+           "pat": pat, "held": held, "drop": drop, "blush": blush}
 
 
 def pose_at(clip_name, frame):

@@ -53,6 +53,29 @@ def _toned(tree, color):
     return mul.outputs["Result"]
 
 
+PINK = (0.95, 0.30, 0.52)
+
+
+def _blushed(tree, color):
+    """`color` pinked where the body's `blush` attribute says, by as much as
+    the material's Blush value, which a pose sets."""
+    mask = tree.nodes.new("ShaderNodeAttribute")
+    mask.attribute_name = "blush"
+    amount = tree.nodes.new("ShaderNodeValue")
+    amount.name = "Blush"
+    amount.outputs[0].default_value = 0.0
+    factor = _node(tree, "ShaderNodeMath")
+    factor.operation = "MULTIPLY"
+    tree.links.new(mask.outputs["Fac"], factor.inputs[0])
+    tree.links.new(amount.outputs[0], factor.inputs[1])
+    mix = _node(tree, "ShaderNodeMix")
+    mix.data_type = "RGBA"
+    mix.inputs["B"].default_value = (*PINK, 1)
+    tree.links.new(factor.outputs["Value"], mix.inputs["Factor"])
+    tree.links.new(color, mix.inputs["A"])
+    return mix.outputs["Result"]
+
+
 def fur_material(name="Fur", patches=True):
     """The hair: blue and violet by patch, roots in shadow, tips catching light."""
     mat = bpy.data.materials.new(name)
@@ -83,7 +106,7 @@ def fur_material(name="Fur", patches=True):
     tree.links.new(coat.outputs["Result"], tinted.inputs["A"])
     tree.links.new(shade.outputs["Color"], tinted.inputs["B"])
 
-    tree.links.new(_toned(tree, tinted.outputs["Result"]), hair.inputs["Color"])
+    tree.links.new(_blushed(tree, _toned(tree, tinted.outputs["Result"])), hair.inputs["Color"])
     tree.links.new(hair.outputs["BSDF"], tree.nodes["Material Output"].inputs["Surface"])
     return mat
 
@@ -102,7 +125,7 @@ def skin_material(name="Skin", patches=True):
     coat.inputs["B"].default_value = tuple(c * 0.55 for c in VIOLET) + (1,)
     if patches:
         tree.links.new(_patches(tree).outputs["Color"], coat.inputs["Factor"])
-    tree.links.new(_toned(tree, coat.outputs["Result"]), bsdf.inputs["Base Color"])
+    tree.links.new(_blushed(tree, _toned(tree, coat.outputs["Result"])), bsdf.inputs["Base Color"])
     return mat
 
 
@@ -243,6 +266,9 @@ def dress(parts, fur=True, draft=False, strands=None):
     tone = model.surface_tone(body)[corners] / TONE_SCALE
     attribute = me.color_attributes.new("tone", "BYTE_COLOR", "CORNER")
     attribute.data.foreach_set("color", np.repeat(tone, 4).astype(np.float32))
+    blush = model.surface_blush(body)[corners]
+    attribute = me.color_attributes.new("blush", "BYTE_COLOR", "CORNER")
+    attribute.data.foreach_set("color", np.repeat(blush, 4).astype(np.float32))
     if fur:
         add_fur(body, "fur", count=count, children=children, radius=radius)
 

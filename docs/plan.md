@@ -88,8 +88,11 @@ WSL). There is no `.blend` to keep: every run builds him from the scripts in
 4. **MVP clips.** `idle`, `hello`, `working` (sitting with a laptop),
    `happy`, `oops` (sweat drop) and `sleepy` (on a cushion, z's rising).
    Props hang from bones and show when a pose names them (`props.py`).
-5. **The rest.** The remaining clips, tool props, stuffing sizes.
-6. **Publish.** Marketplace, README, demo GIF, a nod to Rankello.
+5. **Interaction.** `pat` (hearts), `held` and `drop`, `blush` (pink
+   cheeks, hands over his mouth); transitions between standing, sitting and
+   the cushion (`sit-down`, `stand-up`, `doze-off`, `wake-up`).
+6. **The rest.** Idle fidgets, tool props, stuffing sizes and deflate.
+7. **Publish.** Marketplace, README, demo GIF, a nod to Rankello.
 
 ## Open
 

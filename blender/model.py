@@ -706,6 +706,21 @@ def surface_regions(body, open_=1.0):
     return inside, lip, sole, fur
 
 
+def surface_blush(body):
+    """Per vertex of the rest-pose body, how much it pinks when he blushes: a
+    soft round patch on each cheek, under and outside the eye."""
+    co = np.empty(len(body.data.vertices) * 3, dtype=np.float32)
+    body.data.vertices.foreach_get("co", co)
+    ph = head_space(body_space(tuple(co.reshape(-1, 3).T)))
+    mask = np.zeros(len(co) // 3, dtype=np.float32)
+    for s in (1, -1):
+        spot = (s * 0.18, front(s * 0.18, 0.83), 0.83)
+        d = length(*(ph[i] - spot[i] for i in range(3)))
+        x = np.clip(1 - d / 0.08, 0, 1)
+        mask = np.maximum(mask, x * x * (3 - 2 * x))
+    return mask
+
+
 def surface_tone(body, open_=1.0):
     """Per vertex of the rest-pose body, how light its fur is (1 as is): the
     sockets of the eyes up to the brows, the rim of the mouth, the seam and

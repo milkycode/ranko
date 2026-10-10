@@ -12,7 +12,8 @@ reads it); `<bone>@twist` turns a bone about its own length first;
 `<digit>@curl` and `<digit>@spread` bend a finger at its knuckle and swing
 it across the hand; `@offset` moves the whole of him, `<bone>@offset` one
 bone; `<bone>@scale` stretches a bone along the world's axes; `@mouth` opens
-the mouth from shut (0) to the sculpted grin (1).
+the mouth from shut (0) to the sculpted grin (1); `@blush` pinks his cheeks
+(0 to 1).
 """
 
 import math
@@ -339,7 +340,7 @@ def pose(parts, values):
             continue
         b = rig.data.bones[bone]
         turn = b.matrix_local.to_3x3()
-        if what in ("", "curl", "spread", "twist", "mouth"):
+        if what in ("", "curl", "spread", "twist", "mouth", "blush"):
             continue
         elif what == "offset":
             rig.pose.bones[bone].location = turn.inverted() @ Vector(value)
@@ -349,6 +350,11 @@ def pose(parts, values):
         else:
             raise ValueError(f"unknown pose key {key}")
     props.pose(parts.get("props", {}), values)
+    blush = values.get("@blush", 0.0)
+    for mat in bpy.data.materials:
+        node = mat.node_tree.nodes.get("Blush") if mat.node_tree else None
+        if node:
+            node.outputs[0].default_value = blush
     # How far open the mouth is: 1 the grin as sculpted, 0 shut in a smile.
     shut = min(1.0, max(0.0, 1.0 - values.get("@mouth", 1.0)))
     for obj in (parts["body"], *parts["mouth"].values()):

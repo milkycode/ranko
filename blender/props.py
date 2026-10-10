@@ -80,6 +80,45 @@ def _teardrop(name, material, parent):
     return obj
 
 
+def _heart(name, material, parent):
+    """A heart from two lobes and a point, turned toward the camera."""
+    root = bpy.data.objects.new(name, None)
+    bpy.context.scene.collection.objects.link(root)
+    root.parent = parent
+    root.rotation_euler = (0, 0, deg(-22))
+    root.scale = (0.045, 0.045, 0.045)
+    for side in (-1, 1):
+        lobe = bpy.data.objects.new(f"{name}Lobe{side}", _sphere_mesh(f"{name}Lobe{side}", 0.6))
+        bpy.context.scene.collection.objects.link(lobe)
+        lobe.data.materials.append(material)
+        lobe.parent = root
+        lobe.location = (side * 0.5, 0, 0.25)
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, segments=24, radius1=0.98, radius2=0.0, depth=1.1)
+    me = bpy.data.meshes.new(f"{name}Point")
+    bm.to_mesh(me)
+    bm.free()
+    point = bpy.data.objects.new(f"{name}Point", me)
+    bpy.context.scene.collection.objects.link(point)
+    point.data.materials.append(material)
+    point.parent = root
+    point.location = (0, 0, -0.45)
+    point.rotation_euler = (deg(180), 0, 0)
+    point.scale = (1.0, 0.55, 1.0)
+    return root
+
+
+def _sphere_mesh(name, radius):
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=20, v_segments=10, radius=radius)
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    for poly in me.polygons:
+        poly.use_smooth = True
+    return me
+
+
 def _letter(name, text, size, material, parent):
     curve = bpy.data.curves.new(name, "FONT")
     curve.body = text
@@ -152,6 +191,16 @@ def build(parts, rig, to_bone):
         _letter(f"Z{i + 1}Letter", text, size, ink, z)
         to_bone(z, rig, "root")
         props[f"z{i + 1}"] = z
+
+    # Three hearts that float up off him when he is patted.
+    love = look.plain("Heart", (0.95, 0.12, 0.30), roughness=0.25, coat=1.0)
+    love.node_tree.nodes["Principled BSDF"].inputs["Emission Color"].default_value = (0.95, 0.12, 0.30, 1)
+    love.node_tree.nodes["Principled BSDF"].inputs["Emission Strength"].default_value = 0.6
+    for i, x in enumerate((-0.16, 0.02, 0.18)):
+        heart = _group(f"Heart{i + 1}", (x, -0.12, 1.05))
+        _heart(f"Heart{i + 1}Shape", love, heart)
+        to_bone(heart, rig, "root")
+        props[f"heart{i + 1}"] = heart
 
     for name, prop in props.items():
         REST[name] = prop.matrix_basis.copy()
