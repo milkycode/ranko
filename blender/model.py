@@ -225,15 +225,15 @@ BONES = _bones()
 
 # Measured off previews/n5ocru92jcaa3qe.jpeg: the eyes high on the ball of
 # the head, the grin right under them, a big round chin under that.
-EYE_RADIUS = 0.079
-EYE_X, EYE_Z = 0.096, 0.918
-MOUTH_HALF_WIDTH = 0.245
+EYE_RADIUS = 0.077
+EYE_X, EYE_Z = 0.094, 0.912
+MOUTH_HALF_WIDTH = 0.222
 UPPER_LIP_Z, UPPER_LIP_CURVE = 0.808, 0.30
 
 
 # The head is sculpted at the size of the close-ups it was measured from and
 # set on the body a little smaller, shrunk toward where it meets the chest.
-HEAD_SCALE = 0.92
+HEAD_SCALE = 0.88
 HEAD_PIVOT = (0.0, -0.04, 0.60)
 HEAD_MATRIX = (Matrix.Translation(HEAD_PIVOT) @ Matrix.Scale(HEAD_SCALE, 4)
                @ Matrix.Translation(-Vector(HEAD_PIVOT)))
@@ -245,15 +245,15 @@ def head_space(p):
 
 
 def _head_shape(p):
-    """The head before any carving: a big ball, a little wider low down where
-    the jowls are, cheeks puffed up beside the mouth, a pad over the upper
-    lip and a roll of chin under it."""
-    h = ellipsoid(p, (0, -0.005, 0.822), (0.300, 0.255, 0.252))
-    h = smin(h, ellipsoid(p, (0, -0.040, 0.722), (0.280, 0.222, 0.145)), 0.10)
+    """The head before any carving: a big ball, a little taller than wide,
+    widest at the cheeks and drawn in again toward the chin, cheeks puffed
+    up beside the mouth, a pad over the upper lip and a soft chin under it."""
+    h = ellipsoid(p, (0, -0.005, 0.834), (0.276, 0.252, 0.264))
+    h = smin(h, ellipsoid(p, (0, -0.045, 0.730), (0.248, 0.212, 0.130)), 0.10)
     for s in (1, -1):
-        h = smin(h, ellipsoid(p, (s * 0.200, -0.165, 0.825), (0.085, 0.075, 0.070)), 0.05)
-    h = smin(h, ellipsoid(p, (0, -0.212, 0.845), (0.120, 0.052, 0.042)), 0.04)
-    return smin(h, ellipsoid(p, (0, -0.185, 0.680), (0.205, 0.095, 0.075)), 0.06)
+        h = smin(h, ellipsoid(p, (s * 0.172, -0.172, 0.822), (0.082, 0.072, 0.066)), 0.05)
+    h = smin(h, ellipsoid(p, (0, -0.212, 0.848), (0.118, 0.052, 0.042)), 0.04)
+    return smin(h, ellipsoid(p, (0, -0.190, 0.695), (0.172, 0.082, 0.058)), 0.06)
 
 
 @cache
@@ -308,7 +308,7 @@ def face_features():
     return features
 
 
-MOUTH_DEPTH = 0.104  # at the middle, wide open
+MOUTH_DEPTH = 0.094  # at the middle, wide open
 
 
 def upper_lip(x):
@@ -320,7 +320,7 @@ def lower_lip(x, open_=1.0):
     the corners, so the grin is a half moon; `open_` 0 shuts it to a line."""
     w = MOUTH_HALF_WIDTH
     middle = UPPER_LIP_Z - MOUTH_DEPTH * open_ - 0.004
-    return middle + (upper_lip(w) - middle) * abs(x / w) ** 2.3
+    return middle + (upper_lip(w) - middle) * abs(x / w) ** 2.0
 
 
 MOUTH_CAVITY = 0.09  # how deep under the skin the mouth reaches
@@ -331,7 +331,8 @@ def _mouth(p, open_=1.0):
     skin of the face as the cavity, so a grin this wide follows the face
     round to its corners."""
     x, y, z = p
-    between = np.maximum(z - upper_lip(x), lower_lip(x, open_) - z)
+    # The lips meet in rounded corners, not points.
+    between = smax(z - upper_lip(x), lower_lip(x, open_) - z, 0.014)
     under_skin = np.maximum(-_head_shape(p) - MOUTH_CAVITY, y + 0.02)
     return np.maximum(between, under_skin)
 
@@ -575,17 +576,17 @@ def build_mouth(pose=None, open_=1.0):
     standing on the lower one, and a tongue on the floor of the hollow."""
     m = pose_matrices(pose or {})["head"]
     upper = []
-    for i, x in enumerate(np.linspace(-0.180, 0.180, 9)):
+    for i, x in enumerate(np.linspace(-0.164, 0.164, 9)):
         lip = upper_lip(x)
         upper.append(_tooth(f"Upper{i}", (x, front(x, lip) + 0.030, lip - 0.007), (0.0145, 0.010, 0.017), 1,
                             -2.4 * x, taper=0.60))
     lower = []
-    for i, x in enumerate(np.linspace(-0.130, 0.130, 7)):
+    for i, x in enumerate(np.linspace(-0.118, 0.118, 7)):
         z = lower_lip(x, open_) + 0.009
         lower.append(_tooth(f"Lower{i}", (x, front(x, z) + 0.030, z), (0.0160, 0.011, 0.016), -1, -2.4 * x))
     bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=1)
     tongue = bpy.context.active_object
-    tongue.scale = (0.135, 0.075, 0.032)
+    tongue.scale = (0.125, 0.072, 0.030)
     z = lower_lip(0, open_) + 0.030
     tongue.location = (0, front(0, z) + 0.085, z)
     parts = {"TeethUpper": _joined("TeethUpper", upper), "TeethLower": _joined("TeethLower", lower),
