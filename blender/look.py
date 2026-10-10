@@ -139,10 +139,10 @@ def eye_material():
 
     ramp = tree.nodes.new("ShaderNodeValToRGB")
     # A big iris, about half the eye across, and a big pupil in it.
-    white, ring, iris, inner, pupil = (0.80, 0.80, 0.82), (0.04, 0.04, 0.05), (0.30, 0.30, 0.33), \
-        (0.20, 0.20, 0.22), (0.003, 0.003, 0.004)
-    stops = [(0.0, white), (0.852, white), (0.861, ring), (0.874, iris), (0.938, inner), (0.951, ring),
-             (0.955, pupil), (1.0, pupil)]
+    white, ring, iris, inner, pupil = (0.80, 0.80, 0.82), (0.03, 0.03, 0.035), (0.17, 0.17, 0.19), \
+        (0.11, 0.11, 0.12), (0.003, 0.003, 0.004)
+    stops = [(0.0, white), (0.852, white), (0.859, ring), (0.868, iris), (0.925, inner), (0.938, ring),
+             (0.942, pupil), (1.0, pupil)]
     elements = ramp.color_ramp.elements
     while len(elements) < len(stops):
         elements.new(0.5)
@@ -203,8 +203,8 @@ def dress(parts, fur=True, draft=False):
     body.data.materials.append(plain("Lip", (0.050, 0.080, 0.340), roughness=0.50, subsurface=0.15))
 
     inside, lip, sole, density = model.surface_regions(body)
-    # Faces in the hollow of the mouth get its dark lining, the lips their
-    # bare blue skin, the soles their bare pads; the rest, skin.
+    # Faces just inside the mouth get bare blue lip, those further in its dark
+    # lining, the soles their bare pads; the rest, skin.
     me = body.data
     corners = np.empty(len(me.loops), dtype=np.int32)
     me.loops.foreach_get("vertex_index", corners)
@@ -214,7 +214,7 @@ def dress(parts, fur=True, draft=False):
     depth = np.add.reduceat(inside[corners], starts) / sizes
     pad = np.add.reduceat(sole[corners], starts) / sizes
     bare = np.add.reduceat(lip[corners], starts) / sizes
-    index = np.where(depth > 0.5, 2, np.where(bare > 0.5, 4, np.where(pad > 0.5, 3, 1)))
+    index = np.where(bare > 0.5, 4, np.where(depth > 0.5, 2, np.where(pad > 0.5, 3, 1)))
     me.polygons.foreach_set("material_index", index.astype(np.int32))
     # Weights in steps of 1/64, a call per step rather than per vertex.
     group = body.vertex_groups.new(name="fur")
