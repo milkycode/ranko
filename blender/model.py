@@ -289,8 +289,8 @@ def face_features():
     w = MOUTH_HALF_WIDTH
     xs = [w * (2 * k / 14 - 1) * 0.96 for k in range(15)]
     taper = [math.sqrt(max(0.0, 1 - (x / w) ** 2)) for x in xs]
-    features.append(("upper lip", [_on_skin(x, upper_lip(x) + 0.004, 0.006) for x in xs],
-                     [0.010 + 0.014 * t for t in taper], 0.014, False))
+    features.append(("upper lip", [_on_skin(x, upper_lip(x) + 0.002, 0.003) for x in xs],
+                     [0.012 + 0.016 * t for t in taper], 0.014, False))
     features.append(("lower lip", [_on_skin(x, lower_lip(x) - 0.004, 0.004) for x in xs],
                      [0.010 + 0.026 * t for t in taper], 0.018, False))
     for s in (1, -1):
@@ -649,10 +649,13 @@ def surface_regions(body, open_=1.0):
     ph = head_space(pb)
     mouth = _mouth(ph, open_) * HEAD_SCALE
     inside = np.clip(1 - mouth / 0.004, 0, 1)
-    # The bare lip rolling into the mouth, between the fur and the hollow.
-    lip = ((mouth >= 0.002) & (mouth < 0.016)).astype(np.float32)
+    # The bare lip rolling into the mouth, between the fur and the hollow;
+    # the upper one shows more of itself.
+    above = ph[2] > upper_lip(ph[0]) - 0.01
+    reach = np.where(above, 0.024, 0.016)
+    lip = ((mouth >= 0.002) & (mouth < reach)).astype(np.float32)
     sole = (z < 0.003).astype(np.float32)
-    fur = np.clip((mouth - 0.012) / 0.02, 0, 1)
+    fur = np.clip((mouth - (reach - 0.004)) / 0.02, 0, 1)
     fur = np.minimum(fur, 1 - np.clip((0.010 - z) / 0.006, 0, 1))
     # The face: the front of the head, between the brows and the chin.
     face = ellipsoid(ph, (0, -0.25, 0.83), (0.26, 0.10, 0.22))
