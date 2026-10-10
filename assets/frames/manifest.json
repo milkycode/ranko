@@ -62,6 +62,22 @@
         "cushion",
         "stand"
       ]
+    },
+    "pat": {
+      "frames": 28,
+      "loop": false
+    },
+    "held": {
+      "frames": 24,
+      "loop": true
+    },
+    "drop": {
+      "frames": 16,
+      "loop": false
+    },
+    "blush": {
+      "frames": 32,
+      "loop": false
     }
   }
 }
