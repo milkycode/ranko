@@ -126,7 +126,8 @@ def eye_material():
     bsdf.inputs["Roughness"].default_value = 0.25
     bsdf.inputs["Coat Weight"].default_value = 1.0
     bsdf.inputs["Coat Roughness"].default_value = 0.03
-    bsdf.inputs["Subsurface Weight"].default_value = 0.15
+    # A little light carried inside the white; more would wash out the iris.
+    bsdf.inputs["Subsurface Weight"].default_value = 0.05
 
     coords = tree.nodes.new("ShaderNodeTexCoord")
     unit = tree.nodes.new("ShaderNodeVectorMath")
@@ -138,11 +139,12 @@ def eye_material():
     tree.links.new(unit.outputs["Vector"], facing.inputs[0])
 
     ramp = tree.nodes.new("ShaderNodeValToRGB")
-    # A big iris, about half the eye across, and a big pupil in it.
-    white, ring, iris, inner, pupil = (0.80, 0.80, 0.82), (0.03, 0.03, 0.035), (0.17, 0.17, 0.19), \
-        (0.11, 0.11, 0.12), (0.003, 0.003, 0.004)
-    stops = [(0.0, white), (0.852, white), (0.859, ring), (0.868, iris), (0.925, inner), (0.938, ring),
-             (0.942, pupil), (1.0, pupil)]
+    # Measured off the main preview: the iris about 0.41 of the eye across,
+    # the pupil about 0.24.
+    white, ring, iris, inner, pupil = (0.80, 0.80, 0.82), (0.02, 0.02, 0.025), (0.13, 0.13, 0.145), \
+        (0.08, 0.08, 0.09), (0.003, 0.003, 0.004)
+    stops = [(0.0, white), (0.905, white), (0.911, ring), (0.919, iris), (0.960, inner), (0.967, ring),
+             (0.970, pupil), (1.0, pupil)]
     elements = ramp.color_ramp.elements
     while len(elements) < len(stops):
         elements.new(0.5)
@@ -241,9 +243,11 @@ def dress(parts, fur=True, draft=False):
 
 
 def lights(eyes, center=(0, 0, 0.55)):
-    """A soft studio: key from the upper left, fill from the right, a rim
-    from behind that makes the fur's edge glow, and a small light that only
-    the eyes see, for the glint in them."""
+    """A soft studio: key from the upper left, fill from the right and a rim
+    from behind that makes the fur's edge glow. The eyes are lit apart: the
+    big lights, mirrored in their glossy coat, would lay a haze over the
+    iris, so the eyes get a soft light they do not mirror and one small
+    glint they do."""
     from mathutils import Vector
     center = Vector(center)
 
@@ -256,11 +260,23 @@ def lights(eyes, center=(0, 0, 0.55)):
         obj.rotation_euler = (center - Vector(location)).to_track_quat("-Z", "Y").to_euler()
         return obj
 
-    area("Key", (-2.5, -3.2, 3.2), 380, 3.0, (1.0, 0.97, 0.93))
-    area("Fill", (3.0, -2.5, 1.2), 120, 4.0, (0.92, 0.95, 1.0))
-    area("Rim", (0.8, 3.0, 2.6), 220, 2.0, (0.9, 0.85, 1.0))
-    glint = area("Glint", (1.2, -3.0, 2.0), 60, 0.25)
-    seen_by = bpy.data.collections.new("Eyes")
-    for eye in eyes:
-        seen_by.objects.link(eye)
-    glint.light_linking.receiver_collection = seen_by
+    def receivers(name, state):
+        group = bpy.data.collections.new(name)
+        for eye in eyes:
+            group.objects.link(eye)
+        for member in group.collection_objects:
+            member.light_linking.link_state = state
+        return group
+
+    not_eyes = receivers("NotEyes", "EXCLUDE")
+    for light in (area("Key", (-2.5, -3.2, 3.2), 380, 3.0, (1.0, 0.97, 0.93)),
+                  area("Fill", (3.0, -2.5, 1.2), 120, 4.0, (0.92, 0.95, 1.0)),
+                  area("Rim", (0.8, 3.0, 2.6), 220, 2.0, (0.9, 0.85, 1.0))):
+        light.light_linking.receiver_collection = not_eyes
+
+    only_eyes = receivers("Eyes", "INCLUDE")
+    soft = area("EyeLight", (-1.4, -3.0, 2.2), 260, 2.5)
+    soft.visible_glossy = False
+    soft.light_linking.receiver_collection = only_eyes
+    glint = area("Glint", (0.9, -3.0, 2.9), 90, 0.12)
+    glint.light_linking.receiver_collection = only_eyes

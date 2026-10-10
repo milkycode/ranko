@@ -521,9 +521,10 @@ def build_body(pose=None, **params):
     return body
 
 
-# Where the eyes look when nothing else is asked: at someone in front of him.
+# Where the eyes look when nothing else is asked: at someone in front of him,
+# each turned in a little more, the slight squint of the main preview.
 GAZE_TARGET = Vector((0, -3.0, 1.0))
-GAZE_OUT = 0.0
+GAZE_OUT = -0.12
 
 
 def gaze(side, target=GAZE_TARGET, out=GAZE_OUT):
