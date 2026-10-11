@@ -259,21 +259,32 @@ def build(parts, rig, to_bone):
     # notepad for his lap.
     yellow = look.plain("Pencil", (0.95, 0.70, 0.10), roughness=0.45)
     lead = look.plain("Lead", (0.08, 0.08, 0.09), roughness=0.5)
+    wood_light = look.plain("PencilWood", (0.85, 0.62, 0.40), roughness=0.7)
+    eraser = look.plain("Eraser", (0.95, 0.45, 0.55), roughness=0.7)
     pencil = _in_hand("Pencil", -1)
     _piece("PencilBody", bpy.ops.mesh.primitive_cylinder_add, pencil, yellow, (0, -0.045, 0),
-           rotation=(deg(90), 0, 0), radius=0.014, depth=0.25, vertices=6)
-    _piece("PencilTip", bpy.ops.mesh.primitive_cone_add, pencil, lead, (0, -0.188, 0),
-           rotation=(deg(90), 0, 0), radius1=0.014, depth=0.036, vertices=12)
+           rotation=(deg(90), 0, 0), radius=0.017, depth=0.27, vertices=6)
+    _piece("PencilWood", bpy.ops.mesh.primitive_cone_add, pencil, wood_light, (0, -0.198, 0),
+           rotation=(deg(90), 0, 0), radius1=0.017, radius2=0.006, depth=0.036, vertices=12)
+    _piece("PencilTip", bpy.ops.mesh.primitive_cone_add, pencil, lead, (0, -0.222, 0),
+           rotation=(deg(90), 0, 0), radius1=0.006, depth=0.012, vertices=12)
+    _piece("PencilEraser", bpy.ops.mesh.primitive_cylinder_add, pencil, eraser, (0, 0.105, 0),
+           rotation=(deg(90), 0, 0), radius=0.017, depth=0.03, vertices=12)
     to_bone(pencil, rig, "hand.R")
     props["pencil"] = pencil
 
-    paper = look.plain("Paper", (0.85, 0.85, 0.80), roughness=0.8)
-    cover = look.plain("Cover", (0.10, 0.20, 0.55), roughness=0.6)
+    # A thick pad, bound in red along its far edge, tipped up a little toward
+    # the camera so its page shows.
+    paper = look.plain("Paper", (0.88, 0.88, 0.82), roughness=0.8)
+    cover = look.plain("Cover", (0.75, 0.10, 0.10), roughness=0.6)
+    ink = look.plain("Ink", (0.25, 0.40, 0.75), roughness=0.6)
     notepad = _group("Notepad", (0, -0.36, 0.13))
-    _rounded_box("NotepadPaper", (0.20, 0.26, 0.016), 0.003, paper, notepad)
-    _rounded_box("NotepadCover", (0.20, 0.04, 0.020), 0.004, cover, notepad, (0, -0.12, 0.002))
-    for i in range(4):
-        _rounded_box(f"NotepadLine{i}", (0.15, 0.003, 0.001), 0.0005, cover, notepad, (0, -0.06 + i * 0.04, 0.0085))
+    notepad.matrix_world = notepad.matrix_world @ Matrix.Rotation(deg(20), 4, "X")
+    _rounded_box("NotepadPaper", (0.25, 0.31, 0.030), 0.004, paper, notepad)
+    _rounded_box("NotepadCover", (0.255, 0.05, 0.036), 0.006, cover, notepad, (0, -0.135, 0.002))
+    for i in range(5):
+        _rounded_box(f"NotepadLine{i}", (0.19, 0.004, 0.001), 0.0005, ink, notepad,
+                     (0, -0.075 + i * 0.045, 0.0152))
     to_bone(notepad, rig, "root")
     props["notepad"] = notepad
 

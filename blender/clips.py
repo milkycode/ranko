@@ -212,6 +212,10 @@ def sit(p, drop=SIT_DROP):
     p["@offset"] = (0, 0, -drop)
 
 
+# Where the head turns, as designed: the head bone's base.
+HEAD_BASE = next(b for b in model._upper_bones() if b.name == "head").head
+
+
 def look_at_viewer(p, amount=1.0):
     """The camera sits off to his right: the head turns a little toward it and
     the eyes the rest of the way."""
@@ -624,30 +628,42 @@ def wonder(t, frame):
 
 
 def psst(t, frame):
-    """Up to something: a finger to his lips, the other hand on his hip, a
-    sly look sideways at you under lowered brows."""
+    """Up to something: turns his face to you and holds a finger up across
+    his lips, the other hand on his hip, a sly look under lowered brows."""
     g = _gesture(t)
     p = Pose(ARMS_DOWN)
     p.relax_hands()
-    # His arms are short: the wrist goes as far toward his lips as it can, and
-    # the finger points the rest of the way, up across them.
-    lips = Vector(rig.from_head((-0.02, model.front(-0.02, 0.79), 0.79)))
-    shoulder = Vector(model._lifted(model._mirror(model.SHOULDER)))
-    wrist = shoulder + (lips - shoulder).normalized() * 0.255 + Vector((0, 0, -0.03))
+    head = (0, 0, -28)  # to the camera off to his right, and a little past
+    p.turn("head", *(a * g for a in head))
+    # His arms are short, so his face turns to meet the hand: the index finger
+    # stands up in front of his lips, a little to his right and leaning
+    # forward, and the wrist goes where that puts it.
+    turn = Euler(tuple(map(deg, head)), "XYZ").to_matrix()
+    pivot = Vector(model._lifted(HEAD_BASE))
+    lips = pivot + turn @ (Vector(rig.from_head((-0.08, model.front(-0.08, 0.79), 0.79))) - pivot)
+    face = turn @ Vector((0, -1, 0))
+    tip = lips + face * 0.035 + Vector((0, 0, 0.035))
+    finger = Vector((0.1, -0.25, 1)).normalized()
+    thumb = Vector((0.3, 1, 0))
+    thumb = (thumb - finger * thumb.dot(finger)).normalized()
+    # The index finger leaves the hand at an angle toward the thumb.
+    h = model.hand(-1)
+    to_tip = [d for d in h.digits if d[0] == "index"][0][2] - h.palm + h.basis[0] * 0.055
+    angle = math.atan2(to_tip.dot(h.basis[1]), to_tip.dot(h.basis[0]))
+    along = finger * math.cos(angle) - thumb * math.sin(angle)
+    wrist = tip - finger * to_tip.length
     reach(p, "R", tuple(wrist), pole=(1, 0.1, -1), amount=g)
-    orient_hand(p, "R", along=lips + Vector((0, 0, 0.05)) - wrist, thumb=(0.4, 1, 0), amount=g)
+    orient_hand(p, "R", along=along, thumb=thumb, amount=g)
     p.hand_shape("R", "point", g)
-    p.turn("chest", z=-6 * g)
+    p["thumb.R@curl"] = lerp(p["thumb.R@curl"], 90, g)  # tucked in, out of the way
     reach(p, "L", (0.36, 0.03, 0.43), pole=(1, 0.8, 0.1), amount=g)
     p.hand_shape("L", "fist", 0.6 * g)
-    p.turn("root", z=-6 * g)
-    p.turn("head", x=4 * g, y=-4 * g)
     for side, s in (("L", 1), ("R", -1)):
         p.turn(f"brow.{side}", y=-12 * s * g)
         p[f"brow.{side}@offset"] = (0, 0, -0.006 * g)
+        p.turn(f"eye.{side}", z=4 * g)
     p.lids(0.35 * g, lower=0.15 * g)
-    look_at_viewer(p, 1 + 0.6 * g)
-    p["@mouth"] = lerp(0.13, 0.05, g)
+    p["@mouth"] = lerp(0.13, 0.0, g)
     return p
 
 
@@ -726,7 +742,10 @@ def working_notepad(t, frame):
     reach(p, "R", (-0.04 + loop[0], -0.40, 0.42 + loop[2]), pole=(1, 0.5, -0.4))
     orient_hand(p, "R", along=(0.6, -1, 0.1), thumb=(0.1, 0.2, 1))
     p.hand_shape("R", "fist")
-    reach(p, "L", (0.12, -0.36, 0.33), pole=(1, 0.3, -0.5))
+    # The left hand holds the pad by its edge, palm down, fingers over it.
+    reach(p, "L", (0.25, -0.38, 0.48), pole=(1, 0.3, -0.5))
+    orient_hand(p, "L", along=(-1, -0.3, -0.3), thumb=(0, 1, 0))
+    p.hand_shape("L", "fist", 0.3)
     for side in "LR":
         p.turn(f"eye.{side}", x=16)
     p["@mouth"] = 0.15
