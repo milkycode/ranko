@@ -123,4 +123,8 @@ pictures in `previews/`, which stay out of the repo (`blender/review.py`,
    last half hour of those readings, the week's over the week so far. The
    context says how far auto-compaction is (the breakdown's
    `autoCompactThreshold`, estimated locally), and TodoWrite and the Task
-   tools' calls give the task list's row.
+   tools' calls give the task list's row. Without a list the row is the
+   session: its length (`startedAt`), its turns, the agents `$.agent.list()`
+   has running, the background work and wakeups classic Stop reports, and the
+   turn under way or the last one; its bar is how much of the five-hour
+   window has passed.

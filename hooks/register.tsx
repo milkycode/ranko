@@ -30,11 +30,12 @@ import {
   logChunks,
   nextTasks,
   planLimits,
+  sessionOf,
   summaryOf,
   tasksOf,
   tokens,
 } from './stats'
-import type { CacheReading, LimitSample, Task } from './stats'
+import type { CacheReading, LimitSample, SessionFacts, Task } from './stats'
 
 /**
  * Ranko above the prompt: frames baked by blender/bake.py, played
@@ -119,6 +120,15 @@ type Ranko = {
   fiveHour: { resetsAt?: string; samples: LimitSample[] }
   // Claude's task list in the main conversation.
   tasks: Task[]
+  // For the session row: the main conversation's turns, the one under way
+  // and the last, the agents running, and the background work and wakeups
+  // the last turn left.
+  turns: number
+  turn: { id: string; startedAt: number; tools: number } | null
+  lastTurn: { durationMs: number; tools: number } | null
+  agents: string[]
+  background: { type: string }[]
+  wakeups: { schedule: string; recurring: boolean }[]
 }
 
 type StatsElements = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
@@ -161,6 +171,8 @@ const PLAN_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 const SAMPLES_KEPT_MS = 60 * 60_000
 // The tools that keep Claude's task list.
 const TASK_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'])
+// The agents that count as running.
+const ACTIVE_AGENTS = new Set(['pending', 'running', 'waiting'])
 
 const clamp = (value: number, low: number, high: number) =>
   Math.max(low, Math.min(high, Math.round(value)))
@@ -261,7 +273,17 @@ function statsPlace(bandColumns: number, from: number, to: number) {
 }
 
 async function readUsage($: EngineInterface, s: Ranko) {
-  s.usage = await $.session.usage().catch(() => s.usage)
+  const [usage, agents] = await Promise.all([$.session.usage().catch(() => s.usage), $.agent.list().catch(() => null)])
+  s.usage = usage
+  if (agents) {
+    s.agents = agents.filter(agent => ACTIVE_AGENTS.has(agent.status)).map(agent => agent.type)
+  }
+}
+
+/** How many turns the conversation held before this load: the prompts in it. */
+async function countTurns($: EngineInterface, s: Ranko) {
+  const messages = await $.session.messages().catch(() => [])
+  s.turns = messages.filter(m => m.role === 'user' && m.text.trim() !== '' && !m.toolResults?.length).length
 }
 
 /**
@@ -361,8 +383,8 @@ async function compactNow($: EngineInterface, s: Ranko) {
 
 /**
  * The stats beside Ranko, the same on every surface: a row each for the
- * context, the cache, the limits and Claude's task list while there is one, a
- * dim label, a bar and the reading. The context's row ends in the Compact
+ * context, the cache, the limits and Claude's task list while there is one,
+ * else the session, a dim label, a bar and the reading. The context's row ends in the Compact
  * button once there is something to compact, and it stands out once the
  * context is nearly full; the limits' bar turns red when the five-hour window
  * would run full before it resets.
@@ -373,6 +395,17 @@ function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: 
   const cache = cacheOf(s.cache, cacheTtl(s.isPlan), nowMs)
   const limits = limitsOf(limitsNow(s), nowMs, s.fiveHour.samples)
   const tasks = tasksOf(s.tasks, (s.pet?.runningTurns.size ?? 0) > 0)
+  const facts: SessionFacts = {
+    startedAt: s.usage?.startedAt ?? nowMs,
+    turns: s.turns,
+    turn: s.turn,
+    lastTurn: s.lastTurn,
+    agents: s.agents,
+    background: s.background,
+    wakeups: s.wakeups,
+    ...(s.fiveHour.resetsAt === undefined ? {} : { fiveHourReset: s.fiveHour.resetsAt }),
+  }
+  const session = tasks ? null : sessionOf(facts, nowMs)
   const isCompactable = s.isCompacting || (context?.percent ?? 0) >= COMPACT_FROM
   // A dim label, a bar in the reading's color (or dim, empty, with none), the
   // reading, and what else the row holds.
@@ -406,6 +439,7 @@ function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: 
         ? row('limits', 'Limits', limits.percent, limits.isRunningOut ? 'error' : fillColor(limits.percent), limits.text)
         : null}
       {tasks ? row('tasks', 'Tasks', tasks.percent, 'suggestion', tasks.text) : null}
+      {session ? row('session', 'Session', session.percent ?? 0, session.percent === null ? null : 'subtle', session.text) : null}
     </Box>
   )
 }
@@ -480,7 +514,7 @@ function start($: EngineInterface, s: Ranko) {
     })
     if (s.isOn('stats')) {
       await readUsage($, s)
-      void Promise.all([readPlan($, s), readAutoCompact($, s)]).then(() => host.invalidate())
+      void Promise.all([readPlan($, s), readAutoCompact($, s), countTurns($, s)]).then(() => host.invalidate())
     }
   })()
   return s.starting
@@ -549,6 +583,12 @@ export function register(on: On, options: PluginOptions) {
     autoCompactAt: null,
     fiveHour: { samples: [] },
     tasks: [],
+    turns: 0,
+    turn: null,
+    lastTurn: null,
+    agents: [],
+    background: [],
+    wakeups: [],
   }
 
   on('session.start', async ($, e, next) => {
@@ -602,12 +642,22 @@ export function register(on: On, options: PluginOptions) {
   on('turn.start', async ($, e, next) => {
     // The start doesn't say whose turn it is; any turn means work is under way.
     s.pet?.runningTurns.add(e.turnId)
+    // The first to start while none is under way is taken for the main
+    // conversation's; a subagent's completion says otherwise.
+    s.turn ??= { id: e.turnId, startedAt: await $.clock.now(), tools: 0 }
     await noteActivity($, s)
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    if (!e.agentId) {
+      s.turns += 1
+      s.lastTurn = { durationMs: e.durationMs, tools: s.turn?.tools ?? 0 }
+      s.turn = null
+    } else if (s.turn?.id === e.turnId) {
+      s.turn = null
+    }
     const { pet } = s
     if (!pet) {
       return result
@@ -641,6 +691,9 @@ export function register(on: On, options: PluginOptions) {
     // task of the list.
     if (e.agentId) {
       return next(e)
+    }
+    if (s.turn) {
+      s.turn.tools += 1
     }
     const prop = PROP_FOR_TOOL[e.tool]
     if (pet && prop) {
@@ -697,6 +750,17 @@ export function register(on: On, options: PluginOptions) {
       }
     }
     return result
+  })
+
+  // What the main conversation's turn left running in the background, and
+  // the wakeups it scheduled; subagents the agent list gives live.
+  on('classic.Stop', async ($, e, next) => {
+    s.background = (e.background_tasks ?? []).filter(task => task.type !== 'subagent').map(task => ({ type: task.type }))
+    s.wakeups = (e.session_crons ?? []).map(cron => ({ schedule: cron.schedule, recurring: cron.recurring }))
+    if (s.isOn('stats')) {
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
   })
 
   // A resumed conversation's cache dates from its last response.

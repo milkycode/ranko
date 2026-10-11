@@ -5,8 +5,9 @@ import type { SessionMessage, SessionRateLimit, SessionUsage } from 'claude-code
  * context is and how far auto-compaction is off, how long the prompt cache
  * stays warm, how much of the plan's five-hour window is used, with the
  * limits' reset times and when they run full at the pace they are used, and
- * how far Claude's task list has come; and a compaction's summary cut into
- * lines the transcript draws whole.
+ * how far Claude's task list has come, or else the session: how long it has
+ * run, its turns, and what runs in the background; and a compaction's summary
+ * cut into lines the transcript draws whole.
  *
  * No engine here: register.tsx reads the session and draws what this says.
  */
@@ -68,6 +69,20 @@ export function span(ms: number) {
   }
   const minutes = Math.floor(ms / MINUTE)
   return minutes <= 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+/** A turn's or a session's length: 42s, 2m 14s, 1h 23m, 2d 5h. */
+export function duration(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) {
+    return `${minutes}m ${seconds % 60}s`
+  }
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours}h ${minutes % 60}m` : `${Math.floor(hours / 24)}d ${hours % 24}h`
 }
 
 /** A bar of `width` cells, filled to `percent`. */
@@ -300,6 +315,89 @@ export function tasksOf(tasks: readonly Task[], isWorking: boolean) {
   const current = tasks.find(task => task.status === 'in_progress')
   const doing = current ? ` · ${current.activeForm ?? current.subject}` : done === tasks.length ? ' · all done' : ''
   return { percent: (done / tasks.length) * 100, text: `${done}/${tasks.length}${doing}` }
+}
+
+/** What the session row reads. */
+export type SessionFacts = {
+  // When the session began ($.session.usage()'s startedAt).
+  startedAt: number
+  turns: number
+  // The main conversation's turn under way, and the last one done.
+  turn: { startedAt: number; tools: number } | null
+  lastTurn: { durationMs: number; tools: number } | null
+  // The agent types running, and the background work and wakeups the last
+  // turn left (classic Stop's background_tasks and session_crons).
+  agents: readonly string[]
+  background: readonly { type: string }[]
+  wakeups: readonly { schedule: string; recurring: boolean }[]
+  // The five-hour window's reset, for the bar: how much of it has passed.
+  fiveHourReset?: string
+}
+
+const FIVE_HOURS = 5 * HOUR
+
+/**
+ * When a one-shot wakeup fires: its cron names the minute, hour, day and
+ * month, this year's or, for a month already gone, next year's; null for
+ * one that recurs, doesn't parse, or has passed.
+ */
+export function wakeupAt(schedule: string, recurring: boolean, nowMs: number) {
+  const [minute = Number.NaN, hour = Number.NaN, day = Number.NaN, month = Number.NaN] = schedule
+    .trim()
+    .split(/\s+/)
+    .map(Number)
+  if (recurring || ![minute, hour, day, month].every(Number.isInteger)) {
+    return null
+  }
+  const now = new Date(nowMs)
+  const year = now.getFullYear() + (month - 1 < now.getMonth() ? 1 : 0)
+  const at = new Date(year, month - 1, day, hour, minute).getTime()
+  return at >= nowMs ? at : null
+}
+
+/** `2 agents (Explore, Plan)`, `1 shell`: so many of a kind, with what they are. */
+function counted(n: number, one: string, kinds: readonly string[] = []) {
+  const names = [...new Set(kinds)]
+  return `${n} ${one}${n === 1 ? '' : 's'}${names.length > 0 ? ` (${names.join(', ')})` : ''}`
+}
+
+/**
+ * The session row: how long the session has run and its turns, what runs in
+ * the background, and the turn under way or the last one, in that order, so
+ * a narrow row loses the turn first; and how much of the five-hour window
+ * has passed, for the bar beside the limits' use, or null without one.
+ */
+export function sessionOf(facts: SessionFacts, nowMs: number) {
+  const parts = [duration(nowMs - facts.startedAt), counted(facts.turns, 'turn')]
+  if (facts.agents.length > 0) {
+    parts.push(counted(facts.agents.length, 'agent', facts.agents))
+  }
+  const byType = new Map<string, number>()
+  for (const task of facts.background) {
+    byType.set(task.type, (byType.get(task.type) ?? 0) + 1)
+  }
+  for (const [type, n] of byType) {
+    parts.push(counted(n, type))
+  }
+  const loops = facts.wakeups.filter(wakeup => wakeup.recurring).length
+  const next = facts.wakeups
+    .map(wakeup => wakeupAt(wakeup.schedule, wakeup.recurring, nowMs))
+    .filter((at): at is number => at !== null)
+    .sort((a, b) => a - b)[0]
+  if (next !== undefined) {
+    parts.push(`wakeup ${clockAt(next, nowMs)}`)
+  }
+  if (loops > 0) {
+    parts.push(counted(loops, 'loop'))
+  }
+  if (facts.turn) {
+    parts.push(`this turn ${duration(nowMs - facts.turn.startedAt)}, ${counted(facts.turn.tools, 'tool')}`)
+  } else if (facts.lastTurn) {
+    parts.push(`last ${duration(facts.lastTurn.durationMs)}, ${counted(facts.lastTurn.tools, 'tool')}`)
+  }
+  const reset = facts.fiveHourReset === undefined ? Number.NaN : Date.parse(facts.fiveHourReset)
+  const percent = Number.isNaN(reset) ? null : Math.max(0, Math.min(100, ((nowMs - (reset - FIVE_HOURS)) / FIVE_HOURS) * 100))
+  return { percent, text: parts.join(' · ') }
 }
 
 /**

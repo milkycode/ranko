@@ -625,6 +625,31 @@ describe('register', () => {
     await band.unmount()
   })
 
+  test('without a task list the last row is the session: its turns, what runs, the last turn', async ($, on) => {
+    answerTheWorld(on)
+    on('tool.call', () => ({ result: 'ok', text: 'ok' }))
+    on('agent.list', () => ({ value: [{ id: 'a1', type: 'Explore', status: 'running', description: 'look' }] }))
+    on('classic.Stop', () => ({}))
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    await $.tool.call({ tool: 'Read', file_path: '/work/notes.md' } as never)
+    await band.redraw()
+    expect(await band.find({ type: 'Text', text: /· 0 turns · 1 agent \(Explore\) · this turn \d+s, 1 tool$/ })).toBeDefined()
+
+    await complete($, 't1', 9000)
+    await $.classic.Stop({
+      stop_hook_active: false,
+      background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'npm test' }],
+      session_crons: [{ id: 'c1', schedule: '*/5 * * * *', recurring: true, prompt: 'check' }],
+    } as never)
+    await band.redraw()
+    expect(await band.find({ key: 'session' })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /· 1 turn · 1 agent \(Explore\) · 1 shell · 1 loop · last 9s, 1 tool$/ })).toBeDefined()
+    await band.unmount()
+  })
+
   test('under 15% of context there is nothing to compact: no Compact button', async ($, on) => {
     answerTheWorld(on, 10)
     await $.session.start(START)

@@ -4,6 +4,7 @@ import {
   cacheColor,
   cacheOf,
   contextOf,
+  duration,
   fillColor,
   fullAt,
   isNearlyFull,
@@ -12,10 +13,12 @@ import {
   logChunks,
   nextTasks,
   planLimits,
+  sessionOf,
   span,
   summaryOf,
   tasksOf,
   tokens,
+  wakeupAt,
 } from '../hooks/stats'
 import type { Task } from '../hooks/stats'
 
@@ -181,5 +184,51 @@ describe('stats', () => {
     const summary = { role: 'user' as const, text: 'the summary', toolUses: [] }
     expect(summaryOf([kept], [summary, kept])).toBe('the summary')
     expect(summaryOf([kept], [kept])).toBeNull()
+  })
+
+  test('lengths read short, from seconds to days', () => {
+    expect([42_000, 134_000, 83 * 60_000, 53 * 3_600_000].map(duration)).toEqual(['42s', '2m 14s', '1h 23m', '2d 5h'])
+  })
+
+  test('a one-shot wakeup fires at the time its cron names; a recurring one has none', () => {
+    const now = new Date(2030, 9, 11, 15, 0).getTime()
+    expect(wakeupAt('42 16 11 10 *', false, now)).toBe(new Date(2030, 9, 11, 16, 42).getTime())
+    expect(wakeupAt('42 14 11 10 *', false, now)).toBeNull()
+    expect(wakeupAt('5 9 2 1 *', false, now)).toBe(new Date(2031, 0, 2, 9, 5).getTime())
+    expect(wakeupAt('*/5 * * * *', true, now)).toBeNull()
+  })
+
+  test('the session row: its length and turns, what runs, then the turn', () => {
+    const now = new Date(2030, 9, 11, 15, 0).getTime()
+    const facts = {
+      startedAt: now - 83 * 60_000,
+      turns: 14,
+      turn: null,
+      lastTurn: { durationMs: 134_000, tools: 23 },
+      agents: [],
+      background: [],
+      wakeups: [],
+    }
+    expect(sessionOf(facts, now)).toEqual({ percent: null, text: '1h 23m · 14 turns · last 2m 14s, 23 tools' })
+
+    const busy = sessionOf(
+      {
+        ...facts,
+        turn: { startedAt: now - 65_000, tools: 1 },
+        agents: ['Explore', 'Plan', 'Explore'],
+        background: [{ type: 'shell' }],
+        wakeups: [
+          { schedule: '42 16 11 10 *', recurring: false },
+          { schedule: '*/5 * * * *', recurring: true },
+        ],
+        // Two hours into the five-hour window.
+        fiveHourReset: new Date(now + 3 * 3_600_000).toISOString(),
+      },
+      now,
+    )
+    expect(busy.text).toBe(
+      '1h 23m · 14 turns · 3 agents (Explore, Plan) · 1 shell · wakeup 16:42 · 1 loop · this turn 1m 5s, 1 tool',
+    )
+    expect(Math.round(busy.percent ?? 0)).toBe(40)
   })
 })
