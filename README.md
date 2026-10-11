@@ -39,8 +39,8 @@ endpoint asks them to wait, they all do.
 It is a Claude Code mod: frames baked in Blender, played above the prompt.
 In a terminal they play by swapping an `Image`'s source with `$.ui.blit`,
 which needs the kitty graphics protocol (kitty, Ghostty); in other terminals
-he stays out of the way. In the Claude desktop app each frame is drawn as an
-SVG, ten a second; while you drag him there, a dashed frame shows where he
+he stays out of the way. In the Claude desktop app each frame is drawn as a
+WebP in an SVG, ten a second; while you drag him there, a dashed frame shows where he
 will land, and he moves when you let go. Asleep for a minute, he is drawn
 four times a second, in both; after ten he holds still, drawn not at all,
 until you type in the prompt or a turn starts. On Windows the desktop app is the
@@ -107,7 +107,7 @@ hand.
 | `blender/rig.py` | armature, skin weights from the shapes each bone carries, lids, poses |
 | `blender/clips.py` | the motion of every clip, frame by frame |
 | `blender/bake.py` | renders each frame as a plush and a shadow layer |
-| `blender/composite.py` | lays them over each other into `assets/frames` |
+| `blender/composite.py` | lays them over each other into `assets/frames`, as a PNG for the terminal and a WebP for the desktop app |
 | `blender/preview.py`, `review.py`, `fit.py` | large renders beside the reference pictures |
 | `blender/gif.py` | plays clips as a GIF, to watch a motion outside a terminal |
 
@@ -117,6 +117,9 @@ Rebake the frames:
 blender -b --factory-startup -P blender/bake.py -- render build/layers [clip ...]
 python3 blender/composite.py build/layers assets/frames [clip ...]
 ```
+
+`python3 blender/composite.py --webp assets/frames` writes the WebPs anew
+from the PNGs alone, without the layers.
 
 A frame takes about 12 seconds on an RTX 4060 (CUDA), most of it for the fur;
 all of them take three hours.

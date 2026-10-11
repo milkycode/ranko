@@ -46,7 +46,7 @@ import type { CacheReading, LimitSample, PlanReading, SessionFacts, Task } from 
  * main conversation is doing (pet.ts).
  *
  * The terminal draws pixels through the Image. The desktop app has no
- * Image: there each frame is a PNG inside an SVG, and the band is drawn again
+ * Image: there each frame is a WebP inside an SVG, and the band is drawn again
  * for every frame, which it does up to ten times a second. Elsewhere, or in a
  * terminal without an image protocol, the band is left as it was. Every
  * reaction beyond the base moods is a `userConfig` switch, on unless turned
@@ -85,8 +85,10 @@ type Ranko = {
   isUnsupported: boolean
   // Set while the desktop app shows the pet: each tick redraws its band.
   isOnDesktop: boolean
-  // The frames the desktop drew lately, base64 by file, the oldest first.
+  // The frames the desktop drew lately, base64 by file, the oldest first,
+  // and how many characters they come to.
   frames: Map<string, string>
+  frameChars: number
   // The band column of the pet's left edge; null keeps it at the right end.
   left: number | null
   bandColumns: number
@@ -176,8 +178,9 @@ const TERMINAL_CELL_PX = { width: 8, height: 16 }
 // The desktop lays the band out in cells of its own, measured there at about
 // 10 px wide and 24 tall: 96 px of Ranko take 10 of them by 4.
 const DESKTOP_CELL_PX = { width: 10, height: 24 }
-// How many frames the desktop keeps read: a few clips' worth.
-const FRAME_CACHE = 256
+// How much of the frames the desktop keeps read, in base64 characters, some
+// 10 MB: every frame as WebP, a few clips' worth as PNG.
+const FRAME_CACHE_CHARS = 10_000_000
 // The most an Svg's source may hold.
 const SVG_LIMIT = 131072
 // The stats beside Ranko take at least this many columns and at most this
@@ -232,8 +235,12 @@ const FAILED = /\b[1-9]\d* (failed|failing|failures?)\b|\bfailures?: [1-9]|\bFAI
 const clamp = (value: number, low: number, high: number) =>
   Math.max(low, Math.min(high, Math.round(value)))
 
-const fileOf = (s: Ranko, clip: string, frame: number) =>
-  `${s.root}/assets/frames/${clip}/${String(frame).padStart(3, '0')}.png`
+const fileOf = (s: Ranko, clip: string, frame: number, format: 'png' | 'webp' = 'png') =>
+  `${s.root}/assets/frames/${clip}/${String(frame).padStart(3, '0')}.${format}`
+
+/** A frame as the desktop reads it: its WebP, a quarter of the PNG's bytes, where the bake made them all. */
+const desktopFileOf = (s: Ranko, clip: string, frame: number) =>
+  fileOf(s, clip, frame, s.manifest?.webp === true ? 'webp' : 'png')
 
 /** A frame's bytes, base64, from the desktop's cache or the file. */
 async function frameBytes($: EngineInterface, s: Ranko, file: string) {
@@ -246,9 +253,13 @@ async function frameBytes($: EngineInterface, s: Ranko, file: string) {
   try {
     const { base64 } = await $.fs.read(file, { as: 'bytes' })
     s.frames.set(file, base64)
-    const oldest = s.frames.keys().next().value
-    if (s.frames.size > FRAME_CACHE && oldest !== undefined) {
-      s.frames.delete(oldest)
+    s.frameChars += base64.length
+    for (const [old, bytes] of s.frames) {
+      if (s.frameChars <= FRAME_CACHE_CHARS) {
+        break
+      }
+      s.frames.delete(old)
+      s.frameChars -= bytes.length
     }
     return base64
   } catch {
@@ -257,9 +268,10 @@ async function frameBytes($: EngineInterface, s: Ranko, file: string) {
 }
 
 /**
- * A frame as the desktop draws it: the PNG inside an SVG that the Svg element
- * scales to the size it is given, faded by `opacity` (a mini walking off).
- * Null when the file can't be read or the SVG would be over the limit.
+ * A frame as the desktop draws it: its WebP or PNG inside an SVG that the
+ * Svg element scales to the size it is given, faded by `opacity` (a mini
+ * walking off). Null when the file can't be read or the SVG would be over
+ * the limit.
  */
 async function desktopFrame($: EngineInterface, s: Ranko, file: string, opacity = 1) {
   const base64 = await frameBytes($, s, file)
@@ -268,9 +280,10 @@ async function desktopFrame($: EngineInterface, s: Ranko, file: string, opacity 
   }
   const { width, height } = desktopSize(s.manifest)
   const fade = opacity < 1 ? ` opacity="${opacity.toFixed(2)}"` : ''
+  const type = file.endsWith('.webp') ? 'image/webp' : 'image/png'
   const source =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
-    `<image width="${width}" height="${height}"${fade} href="data:image/png;base64,${base64}"/></svg>`
+    `<image width="${width}" height="${height}"${fade} href="data:${type};base64,${base64}"/></svg>`
   return source.length <= SVG_LIMIT ? source : null
 }
 
@@ -806,6 +819,7 @@ export function register(on: On, options: PluginOptions) {
     isUnsupported: false,
     isOnDesktop: false,
     frames: new Map(),
+    frameChars: 0,
     left: null,
     bandColumns: 0,
     petColumns: 0,
@@ -1216,9 +1230,9 @@ export function register(on: On, options: PluginOptions) {
       const places = miniPlaces(s, pet, petLeft, size.columns, mini.columns)
       const working = pet.framesOf('working')
       const [main, ...minis] = await Promise.all([
-        desktopFrame($, s, fileOf(s, pet.clip, pet.fileFrame())),
+        desktopFrame($, s, desktopFileOf(s, pet.clip, pet.fileFrame())),
         ...places.map(({ mini: m }) =>
-          desktopFrame($, s, fileOf(s, 'working', m.frame % working), 1 - (m.leaving ?? 0) / LEAVE_FRAMES),
+          desktopFrame($, s, desktopFileOf(s, 'working', m.frame % working), 1 - (m.leaving ?? 0) / LEAVE_FRAMES),
         ),
       ])
       if (!main) {

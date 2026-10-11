@@ -79,6 +79,8 @@ export type Manifest = {
   columns: number
   rows: number
   clips: Record<string, ClipInfo>
+  /** Whether every frame has a WebP beside its PNG, for the desktop to draw. */
+  webp?: boolean
 }
 
 /** Whether parsed JSON is a manifest this mod can play: a frames folder from

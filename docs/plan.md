@@ -25,9 +25,13 @@ The mod never knows which character it plays. It reads
 - `Image` draws only through the kitty graphics protocol: **kitty or
   Ghostty**. Windows Terminal shows nothing. In a terminal on Windows that
   means Claude Code in WSL, inside kitty (WSLg). WezTerm is untested.
-- **The desktop app** has no `Image` but draws `Svg`. Each frame is its PNG
-  inside an SVG (`<image href="data:image/png;base64,…">`), and the band is
-  drawn again for every frame, at most ten times a second. Tested on Windows
+- **The desktop app** has no `Image` but draws `Svg`. Each frame is its WebP
+  inside an SVG (`<image href="data:image/webp;base64,…">`), and the band is
+  drawn again for every frame, at most ten times a second. At quality 90
+  (alpha lossless) a WebP is a quarter of the PNG, some 7 KB, with the fur
+  kept; the desktop draws WebP, AVIF and PNG there alike, tested side by
+  side. A bake without WebPs (no `"webp": true` in the manifest) is drawn
+  from its PNGs. Tested on Windows
   with the app's sessions running in WSL, where a mod installed at the user
   scope loads too; only a new session picks it up. An `isInteractive` SVG
   flipping frames by SMIL drew nothing there.
@@ -69,7 +73,8 @@ pictures in `previews/`, which stay out of the repo (`blender/review.py`,
    turns in the rest pose's world axes, finger curl and spread, twists,
    offsets, scales, how shut the lids are.
 5. **Bake** (`bake.py`, `composite.py`). 192 px frames as a plush and a
-   shadow layer, laid over each other as plushie does. Fewer, thicker strands
+   shadow layer, laid over each other as plushie does, and written as a PNG
+   for the terminal (kitty draws no other format) and a WebP for the desktop. Fewer, thicker strands
    than the previews: a pixel is about 6 mm of Ranko.
 
 ## Clips, and the references for each

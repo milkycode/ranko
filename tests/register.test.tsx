@@ -189,6 +189,21 @@ describe('register', () => {
     await desktop.unmount()
   })
 
+  test('frames baked with WebPs are drawn from those on the desktop; the terminal keeps the PNGs', async ($, on) => {
+    answerTheWorld(on, 10, JSON.stringify({ ...JSON.parse(MANIFEST), webp: true }))
+    await $.session.start(START)
+
+    const desktop = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect((await svgIn(desktop, 'ranko'))?.source).toContain('href="data:image/webp;base64,')
+    expect(await desktopFile(desktop)).toMatch(/frames\/idle\/000\.webp$/)
+    await desktop.unmount()
+
+    const terminal = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    const pet = await terminal.find({ key: 'ranko' })
+    expect(String((pet?.props.source as { file: string }).file)).toMatch(/frames\/idle\/000\.png$/)
+    await terminal.unmount()
+  })
+
   test('on the desktop the frames move with the clock and the clip follows the turn', async ($, on) => {
     const clock = answerTheWorld(on)
     await $.session.start(START)

@@ -2,7 +2,13 @@
 blender/bake.py renders. After plushie's compositor (MIT, Xiaoyi Chen).
 
     python3 blender/composite.py build/layers assets/frames [clip ...]
+    python3 blender/composite.py --webp assets/frames
     python3 blender/composite.py --still plush.png shadow.png out.png
+
+Each frame is written twice: a PNG, which the terminal draws, and a WebP,
+which the desktop app draws in a quarter of the bytes. `--webp` writes the
+WebPs of a frames folder anew from its PNGs, without the layers. The
+manifest says `"webp": true` once every PNG has its WebP beside it.
 
 The shadow's look lives here, so changing it needs no render: OPACITY scales
 it (0 drops it), POOL shapes it into a soft oval under Ranko's feet, and it
@@ -25,6 +31,9 @@ OPACITY = 0.8
 POOL = {"rx": 0.42, "ry": 0.22, "cy": 0.93, "soft": 0.35}
 SIDE_FADE = 48  # pixels over which the shadow fades out toward left and right
 BOTTOM_FADE = 10
+# The desktop's WebPs: lossy colour, lossless alpha. At 90 a frame keeps its
+# fur and loses three quarters of the PNG's bytes; at 80 the fur smears.
+WEBP = {"quality": 90, "alpha_quality": 100, "method": 6}
 
 
 def smoothstep(x):
@@ -67,8 +76,34 @@ def composite_clip(layers, frames, clip):
     for name in names:
         plush = Image.open(os.path.join(source, f"{name}.plush.png"))
         shadow = Image.open(os.path.join(source, f"{name}.shadow.png"))
-        composite(plush, shadow).save(os.path.join(target, f"{name}.png"))
+        frame = composite(plush, shadow)
+        frame.save(os.path.join(target, f"{name}.png"))
+        frame.save(os.path.join(target, f"{name}.webp"), "WEBP", **WEBP)
     return len(names)
+
+
+def pngs(frames):
+    """Every frame's PNG in a frames folder."""
+    return sorted(
+        os.path.join(frames, clip, name)
+        for clip in os.listdir(frames)
+        if os.path.isdir(os.path.join(frames, clip))
+        for name in os.listdir(os.path.join(frames, clip))
+        if name.endswith(".png")
+    )
+
+
+def write_manifest(frames, manifest):
+    """The manifest names only the clips the frames folder holds, so the mod
+    never picks one that has no frames yet, and says whether every frame has
+    its WebP."""
+    manifest["clips"] = {
+        name: info for name, info in manifest["clips"].items() if os.path.isdir(os.path.join(frames, name))
+    }
+    manifest["webp"] = all(os.path.exists(png[: -len(".png")] + ".webp") for png in pngs(frames))
+    with open(os.path.join(frames, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+        f.write("\n")
 
 
 def main(args):
@@ -76,20 +111,20 @@ def main(args):
         composite(Image.open(args[1]), Image.open(args[2])).save(args[3])
         return
 
+    if args[:1] == ["--webp"]:
+        frames = args[1]
+        for png in pngs(frames):
+            Image.open(png).save(png[: -len(".png")] + ".webp", "WEBP", **WEBP)
+        with open(os.path.join(frames, "manifest.json")) as f:
+            write_manifest(frames, json.load(f))
+        print(f"wrote a WebP beside each of {len(pngs(frames))} frames in {frames}")
+        return
+
     layers, frames, clips = args[0], args[1], args[2:]
     clips = clips or sorted(d for d in os.listdir(layers) if os.path.isdir(os.path.join(layers, d)))
     total = sum(composite_clip(layers, frames, clip) for clip in clips)
-
-    # The manifest names only the clips the frames folder holds, so the mod
-    # never picks one that has no frames yet.
     with open(os.path.join(layers, "manifest.json")) as f:
-        manifest = json.load(f)
-    manifest["clips"] = {
-        name: info for name, info in manifest["clips"].items() if os.path.isdir(os.path.join(frames, name))
-    }
-    with open(os.path.join(frames, "manifest.json"), "w") as f:
-        json.dump(manifest, f, indent=2)
-        f.write("\n")
+        write_manifest(frames, json.load(f))
     print(f"composited {total} frames into {frames}")
 
 
