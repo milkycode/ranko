@@ -1,5 +1,7 @@
 # Ranko
 
+![Ranko waves, sits down to work, cheers, gives a thumbs up and says psst](docs/demo.gif)
+
 Ranko, the Rankello monster, lives above the Claude Code prompt and reacts to
 what Claude is doing. He waves hello when a session starts; breathes, blinks
 and swings his tail while he waits; sits down and types on his laptop while
