@@ -23,8 +23,13 @@ The mod never knows which character it plays. It reads
 ## Where it can show
 
 - `Image` draws only through the kitty graphics protocol: **kitty or
-  Ghostty**. Windows Terminal shows nothing. In a terminal on Windows that
-  means Claude Code in WSL, inside kitty (WSLg). WezTerm is untested.
+  Ghostty**. Windows Terminal draws its alt instead, which a blit's deny
+  says; there, as wherever Ranko can't be drawn (a band too short, frames
+  that can't be read), the band holds the stats without him. A `Raster` of
+  half blocks would draw him anywhere, but at his 12×6 cells as a blob of
+  12×12 pixels, recognizable only from about 24×12 cells. In a terminal on
+  Windows, Ranko himself means Claude Code in WSL, inside kitty (WSLg).
+  WezTerm is untested.
 - **The desktop app** has no `Image` but draws `Svg`. Each frame is its WebP
   inside an SVG (`<image href="data:image/webp;base64,…">`), and the band is
   drawn again for every frame, at most ten times a second. At quality 90

@@ -38,8 +38,9 @@ endpoint asks them to wait, they all do.
 
 It is a Claude Code mod: frames baked in Blender, played above the prompt.
 In a terminal they play by swapping an `Image`'s source with `$.ui.blit`,
-which needs the kitty graphics protocol (kitty, Ghostty); in other terminals
-he stays out of the way. In the Claude desktop app each frame is drawn as a
+which needs the kitty graphics protocol (kitty, Ghostty); in other terminals,
+Windows Terminal among them, the band shows the stats without him. In the
+Claude desktop app each frame is drawn as a
 WebP in an SVG, ten a second; while you drag him there, a dashed frame shows where he
 will land, and he moves when you let go. Asleep for a minute, he is drawn
 four times a second, in both; after ten he holds still, drawn not at all,

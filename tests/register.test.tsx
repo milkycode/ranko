@@ -69,8 +69,9 @@ function answerTheWorld(
   autoCompactThreshold?: number,
   // What the plugin's store holds, read and written by it.
   stored: Record<string, unknown> = {},
-  // Told of every blit, by the key of the Image it swaps.
-  onBlit: (key: string) => void = () => {},
+  // Told of every blit, by the key of the Image it swaps; what it returns is
+  // the blit's deny.
+  onBlit: (key: string) => string | void = () => {},
 ) {
   const clock = mock.clock(on)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -84,8 +85,8 @@ function answerTheWorld(
     return { value: undefined }
   })
   on('ui.blit', ($, e) => {
-    onBlit('key' in e ? e.key : '')
-    return { value: {} }
+    const deny = onBlit('key' in e ? e.key : '')
+    return { value: deny === undefined ? {} : { deny } }
   })
   on('ui.render', () => h(Fragment, null) as RenderElement)
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -292,6 +293,35 @@ describe('register', () => {
     await clock.advance(800)
     expect(await shownClip(band)).toBe('working')
     await band.unmount()
+  })
+
+  test('a terminal that draws no pictures shows the stats without Ranko, folded or not', async ($, on) => {
+    const clock = answerTheWorld(on, 42, MANIFEST, [], undefined, {}, () => 'the terminal draws the alt text')
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+
+    // The first blit learns that the terminal draws the Image's alt.
+    await clock.advance(100)
+    await band.redraw()
+    expect(await band.find({ key: 'ranko' })).toBeUndefined()
+    expect(await band.find({ type: 'Text', text: '42% · 84k / 200k' })).toBeDefined()
+    expect(await band.find({ key: 'compact' })).toBeDefined()
+
+    await pressButton(band, 'collapse')
+    expect(await band.find({ key: 'stats-line' })).toBeDefined()
+    await pressButton(band, 'expand')
+    expect(await band.find({ key: 'stats-band' })).toBeDefined()
+    await band.unmount()
+  })
+
+  test('a band too short for Ranko still shows the stats', async ($, on) => {
+    answerTheWorld(on, 42)
+    await $.session.start(START)
+    const short = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND.props, maxRows: 3 } })
+    expect(await short.find({ type: 'Image' })).toBeUndefined()
+    expect(await short.find({ key: 'stats-band' })).toBeDefined()
+    expect(await short.find({ type: 'Text', text: '42% · 84k / 200k' })).toBeDefined()
+    await short.unmount()
   })
 
   test('a narrow band or a survey keeps the pet out of the way', async ($, on) => {
@@ -994,14 +1024,17 @@ describe('register', () => {
     })
   }
 
-  test('a frames folder from an older bake leaves the band alone', async ($, on) => {
+  test('a frames folder from an older bake shows the stats without Ranko', async ($, on) => {
     const older = JSON.stringify({ fps: 24, columns: 16, rows: 6, moods: { idle: { frames: 48, loop: true } } })
     answerTheWorld(on, 10, older)
     on('ui.log', () => ({ value: undefined }))
     await $.session.start(START)
-    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-    expect(await band.find({ key: 'ranko' })).toBeUndefined()
-    await band.unmount()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      expect(await band.find({ key: 'ranko' })).toBeUndefined()
+      expect(await band.find({ key: 'stats-band' })).toBeDefined()
+      await band.unmount()
+    }
   })
 
   test('a short band gets a smaller Ranko, a very short one none', async ($, on) => {

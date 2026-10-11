@@ -525,7 +525,7 @@ function stats(
   s: Ranko,
   nowMs: number,
   width: number,
-  rows: number,
+  rows: number | undefined,
   onCompact: () => void,
 ) {
   const { Box, Text } = el
@@ -563,7 +563,7 @@ function stats(
     </Box>
   )
   return (
-    <Box flexDirection="column" width={width} height={rows} overflow="hidden">
+    <Box flexDirection="column" width={width} {...(rows === undefined ? {} : { height: rows })} overflow="hidden">
       {context
         ? row('context', 'Context', context.percent, fillColor(context.percent), context.text, compact ?? undefined)
         : row('context', 'Context', 0, null, 'no reading yet', compact ?? undefined)}
@@ -655,6 +655,26 @@ function statsLine(el: StatsElements, s: Ranko, nowMs: number, width: number, on
         {compactButton(el, s, onCompact)}
       </Box>
       {foldButton(el, true, onExpand)}
+    </Box>
+  )
+}
+
+/**
+ * The full band without Ranko, where he can't be drawn (a terminal without
+ * pictures, a band too short or narrow for him, frames that can't be read):
+ * the stats' rows and the button that folds them. Null with the stats off,
+ * or too narrow a band for them too.
+ */
+function statsBand(el: StatsElements, s: Ranko, nowMs: number, bodyColumns: number, onCompact: () => void, onCollapse: () => void) {
+  const width = Math.min(bodyColumns - FOLD_COLUMNS, STATS_MAX_COLUMNS)
+  if (!s.isOn('stats') || width < STATS_MIN_COLUMNS) {
+    return null
+  }
+  const { Box } = el
+  return (
+    <Box key="stats-band" flexDirection="row" justifyContent="space-between" width={bodyColumns}>
+      {stats(el, s, nowMs, width, undefined, onCompact)}
+      {foldButton(el, false, onCollapse)}
     </Box>
   )
 }
@@ -1215,10 +1235,34 @@ export function register(on: On, options: PluginOptions) {
       await start($, s)
       const { manifest, pet } = s
       const size = manifest && desktopSize(manifest)
-      s.isOnDesktop =
-        s.isShown && !e.props.hasSurvey && pet !== null && size !== null && e.props.bodyColumns >= size.columns
-      if (!s.isOnDesktop || !manifest || !pet || !size) {
+      if (!s.isShown || e.props.hasSurvey) {
+        s.isOnDesktop = false
         return below
+      }
+      // Where he can't be drawn, the stats still are, without him.
+      const withoutRanko = async () => {
+        s.isOnDesktop = false
+        const { Box, Button, Client, Text } = $.ui.resolve(e)
+        const band = statsBand(
+          { Box, Text, Button, Client, isDesktop: true },
+          s,
+          await $.clock.now(),
+          e.props.bodyColumns,
+          () => void compactNow($, s),
+          () => void collapse($, s, true),
+        )
+        return band ? (
+          <Box flexDirection="column">
+            {below}
+            {band}
+          </Box>
+        ) : (
+          below
+        )
+      }
+      s.isOnDesktop = pet !== null && size !== null && e.props.bodyColumns >= size.columns
+      if (!s.isOnDesktop || !manifest || !pet || !size) {
+        return withoutRanko()
       }
       pet.sync(await $.clock.now())
 
@@ -1236,7 +1280,7 @@ export function register(on: On, options: PluginOptions) {
         ),
       ])
       if (!main) {
-        return below
+        return withoutRanko()
       }
 
       const { Box, Button, Client, Svg, Text } = $.ui.resolve(e)
@@ -1303,15 +1347,32 @@ export function register(on: On, options: PluginOptions) {
     await start($, s)
 
     const { manifest, pet } = s
-    const isDrawable =
-      s.isShown &&
-      !s.isUnsupported &&
-      !e.props.hasSurvey &&
-      manifest !== null &&
-      e.props.maxRows >= MIN_ROWS &&
-      e.props.bodyColumns >= manifest.columns + 20
-    if (!isDrawable || !manifest || !pet) {
+    if (!s.isShown || e.props.hasSurvey) {
       return below
+    }
+    const isDrawable =
+      !s.isUnsupported && manifest !== null && e.props.maxRows >= MIN_ROWS && e.props.bodyColumns >= manifest.columns + 20
+    if (!isDrawable || !manifest || !pet) {
+      // Where he can't be drawn, the stats still are, without him; nothing
+      // is blitted meanwhile.
+      s.requestId = null
+      const { Box, Button, Client, Text } = await $.ui.resolve(e)
+      const band = statsBand(
+        { Box, Text, Button, Client, isDesktop: false },
+        s,
+        await $.clock.now(),
+        e.props.bodyColumns,
+        () => void compactNow($, s),
+        () => void collapse($, s, true),
+      )
+      return band ? (
+        <Box flexDirection="column">
+          {below}
+          {band}
+        </Box>
+      ) : (
+        below
+      )
     }
 
     s.requestId = e.requestId
