@@ -24,6 +24,8 @@ will land, and he moves when you let go. On Windows the desktop app is the
 easy way to meet him; in a terminal, run Claude Code in WSL inside kitty
 (WSLg).
 
+![Ranko dozing on his cushion above the prompt in the Claude desktop app](docs/desktop.png)
+
 Meet him and Rankello at [rankello.ai](https://rankello.ai). Developed and
 maintained by [milkycode](https://www.milkycode.com).
 
