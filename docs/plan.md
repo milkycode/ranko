@@ -2,7 +2,7 @@
 
 Ranko, the Rankello monster, lives above the Claude Code prompt and reacts to
 what Claude is doing, the way plushie's Clawd does. The mod code comes from
-plushie (MIT, kept in `plushie/` as a reference, not tracked); the character,
+[plushie](https://github.com/xyc/plushie) (MIT); the character,
 the model and every frame are new.
 
 ## What carries over from plushie
@@ -23,7 +23,7 @@ The mod never knows which character it plays. It reads
 ## Where it can show
 
 - `Image` draws only through the kitty graphics protocol: **kitty or
-  Ghostty**. Windows Terminal shows nothing. On our Windows PCs that means
+  Ghostty**. Windows Terminal shows nothing. On Windows that means
   Claude Code in WSL, inside kitty (WSLg). WezTerm is untested.
 - `$.audio.play` plays only on macOS; elsewhere Ranko is silent.
 
@@ -32,8 +32,9 @@ The mod never knows which character it plays. It reads
 Ranko is built, rigged and groomed by script in Blender 5.2 LTS, headless
 in WSL (Cycles on the RTX 4060 through CUDA; OptiX does not start under
 WSL). There is no `.blend` to keep: every run builds him from the scripts in
-`blender/`, and every change is checked by rendering it beside `previews/`
-(`blender/review.py`, `fit.py`).
+`blender/`, and every change is checked by rendering it beside the reference
+pictures in `previews/`, which stay out of the repo (`blender/review.py`,
+`fit.py`).
 
 1. **Sculpt** (`model.py`). A signed distance field: ellipsoids and round
    cones on a skeleton, joined with smooth unions whose fillet sets how soft
@@ -94,9 +95,5 @@ WSL). There is no `.blend` to keep: every run builds him from the scripts in
 6. **The rest.** Idle fidgets (`wonder`, `psst`, `thumbs`, `look`), tool
    props (`working-magnifier`, `-notepad`, `-binoculars`), stuffing sizes
    (`-plump`, `-stuffed`) and `deflate`.
-7. **Publish.** Marketplace, README, demo GIF, a nod to Rankello.
-
-## Open
-
-- `claude plugin test` runs every test file under the repo, so the
-  `plushie/` reference copy has to live outside it for the tests to pass.
+7. **Publish.** A public repo that is its own marketplace, a README with a
+   demo GIF, and a link to [rankello.ai](https://rankello.ai). *Done.*

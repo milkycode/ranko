@@ -6,6 +6,15 @@
     "name": "milkycode GmbH",
     "url": "https://www.milkycode.com"
   },
+  "homepage": "https://rankello.ai",
+  "repository": "https://github.com/milkycode/ranko",
+  "keywords": [
+    "mod",
+    "mascot",
+    "companion",
+    "rankello",
+    "kitty"
+  ],
   "userConfig": {
     "drag": {
       "type": "boolean",

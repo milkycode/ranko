@@ -2,9 +2,9 @@
 
 ![Ranko waves, sits down to work, cheers, gives a thumbs up and says psst](docs/demo.gif)
 
-Ranko, the Rankello monster, lives above the Claude Code prompt and reacts to
-what Claude is doing. He waves hello when a session starts; breathes, blinks
-and swings his tail while he waits; sits down and types on his laptop while
+Ranko, the [Rankello](https://rankello.ai) monster, lives above the Claude Code
+prompt and reacts to what Claude is doing. He waves hello when a session
+starts; breathes, blinks and swings his tail while he waits; sits down and types on his laptop while
 Claude works; jumps for joy after a long turn; clutches his head with a sweat
 drop when a tool fails or you interrupt; and dozes off on a cushion, z's
 rising, when left alone. Pat him and hearts float up; drag him and he
@@ -20,16 +20,19 @@ swapping an `Image`'s source with `$.ui.blit`. Terminals with the kitty
 graphics protocol (kitty, Ghostty) only; elsewhere he stays out of the way.
 On Windows, run Claude Code in WSL inside kitty (WSLg).
 
-Developed and maintained by [milkycode GmbH](https://www.milkycode.com). The
-mod code comes from [plushie](https://github.com/xyc/plushie) by Xiaoyi Chen.
+Meet him and Rankello at [rankello.ai](https://rankello.ai). Developed and
+maintained by [milkycode GmbH](https://www.milkycode.com). The mod code comes
+from [plushie](https://github.com/xyc/plushie) by Xiaoyi Chen.
 
 ## Install
 
-Needs Claude Code 2.1.287 or later with mods on.
+```
+/plugin marketplace add milkycode/ranko
+/plugin install ranko@ranko
+```
 
-```
-/plugin install ranko --marketplace milkycode/ranko
-```
+Needs Claude Code 2.1.287 or later with mods on. Mods are rolling out; if
+`/ranko` isn't listed after installing, they aren't on for your account yet.
 
 To run it from a checkout instead:
 
@@ -79,8 +82,7 @@ all of them take three hours.
 claude plugin test .
 ```
 
-It runs every `*.test.tsx` under the folder, so keep other plugins (such as a
-plushie checkout) out of it.
+It runs every `*.test.tsx` under the folder.
 
 ## License
 

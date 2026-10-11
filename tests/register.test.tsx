@@ -126,7 +126,9 @@ describe('register', () => {
     await band.unmount()
   })
 
-  test('he sits down to work and stands up when the turn is done', async ($, on) => {
+  // Walking the clock through two idle minutes can outrun the usual 5 s on
+  // a busy machine.
+  test('he sits down to work and stands up when the turn is done', { timeoutMs: 20000 }, async ($, on) => {
     const base = JSON.parse(MANIFEST)
     const seated = JSON.stringify({
       ...base,
