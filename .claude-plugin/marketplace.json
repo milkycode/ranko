@@ -10,7 +10,7 @@
     {
       "name": "ranko",
       "description": "Ranko, the Rankello monster, lives above the prompt and reacts to what Claude is doing: waves hello, works, celebrates, wobbles, blushes, naps, and can be patted and dragged.",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "source": "./",
       "category": "fun"
     }
