@@ -6,9 +6,12 @@ and swings his tail while he waits; sits down and types on his laptop while
 Claude works; jumps for joy after a long turn; clutches his head with a sweat
 drop when a tool fails or you interrupt; and dozes off on a cushion, z's
 rising, when left alone. Pat him and hearts float up; drag him and he
-dangles; thank him and he blushes behind his hands. He sits down and gets up
-between all of these rather than jumping. More reactions are on the way (see
-[docs/plan.md](docs/plan.md)).
+dangles; thank him and he blushes behind his hands. Left alone a while, he
+scratches his head, says psst, gives a thumbs up or looks around. While a
+tool runs he holds a prop for it: a magnifier to read or search, a notepad
+to edit, binoculars for the web. He grows rounder as the context fills and
+lets it out with a sigh on compaction, and he sits down and gets up between
+all of these rather than jumping.
 
 It is a Claude Code mod: frames baked in Blender, played in the terminal by
 swapping an `Image`'s source with `$.ui.blit`. Terminals with the kitty
@@ -65,7 +68,8 @@ blender -b --factory-startup -P blender/bake.py -- render build/layers [clip ...
 python3 blender/composite.py build/layers assets/frames [clip ...]
 ```
 
-A frame takes about 5 seconds on an RTX 4060 (CUDA).
+A frame takes about 12 seconds on an RTX 4060 (CUDA), most of it for the fur;
+all of them take three hours.
 
 ## Test
 

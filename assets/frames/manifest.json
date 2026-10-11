@@ -78,6 +78,59 @@
     "blush": {
       "frames": 32,
       "loop": false
+    },
+    "fidget-wonder": {
+      "frames": 40,
+      "loop": false
+    },
+    "fidget-psst": {
+      "frames": 40,
+      "loop": false
+    },
+    "fidget-thumbs": {
+      "frames": 32,
+      "loop": false
+    },
+    "fidget-look": {
+      "frames": 36,
+      "loop": false
+    },
+    "working-magnifier": {
+      "frames": 24,
+      "loop": true,
+      "posture": "sit"
+    },
+    "working-notepad": {
+      "frames": 24,
+      "loop": true,
+      "posture": "sit"
+    },
+    "working-binoculars": {
+      "frames": 24,
+      "loop": true,
+      "posture": "sit"
+    },
+    "idle-plump": {
+      "frames": 48,
+      "loop": true
+    },
+    "idle-stuffed": {
+      "frames": 48,
+      "loop": true
+    },
+    "working-plump": {
+      "frames": 24,
+      "loop": true,
+      "posture": "sit"
+    },
+    "working-stuffed": {
+      "frames": 24,
+      "loop": true,
+      "posture": "sit"
+    },
+    "deflate": {
+      "frames": 32,
+      "loop": false
     }
   }
 }

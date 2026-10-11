@@ -69,8 +69,8 @@ WSL). There is no `.blend` to keep: every run builds him from the scripts in
 | `sleepy` | idle for two minutes: on a cushion, zzz | `eyb263zuz3jzcln` (bottom right) |
 | `blush` | thanks or praise: hand over mouth | `xtnofujv6mf567z` (left) |
 | `deflate` | compaction: a big sigh | `ylg0wsk3qlog8q4` (left) |
-| `fidget-wonder` | idle fidget: finger on chin | `Ranko_wondering`, `ay40gawqr5zdpf0` |
-| `fidget-psst` | idle fidget: sneaky look | `0wwi3znktas4ylz` |
+| `fidget-wonder` | idle fidget: scratches his head, puzzled | `Ranko_wondering` |
+| `fidget-psst` | idle fidget: finger at his lips, sneaky look | `0wwi3znktas4ylz`, `ay40gawqr5zdpf0` |
 | `fidget-thumbs` | idle fidget: thumbs up | `xbxhu067av28qff` (bottom right) |
 | `fidget-look` | idle fidget: eyes look around | none |
 | `pat`, `held`, `drop`, `idle-plump`/`-stuffed` | pats, drag, context fill | none |
@@ -91,7 +91,9 @@ WSL). There is no `.blend` to keep: every run builds him from the scripts in
 5. **Interaction.** `pat` (hearts), `held` and `drop`, `blush` (pink
    cheeks, hands over his mouth); transitions between standing, sitting and
    the cushion (`sit-down`, `stand-up`, `doze-off`, `wake-up`).
-6. **The rest.** Idle fidgets, tool props, stuffing sizes and deflate.
+6. **The rest.** Idle fidgets (`wonder`, `psst`, `thumbs`, `look`), tool
+   props (`working-magnifier`, `-notepad`, `-binoculars`), stuffing sizes
+   (`-plump`, `-stuffed`) and `deflate`.
 7. **Publish.** Marketplace, README, demo GIF, a nod to Rankello.
 
 ## Open
