@@ -12,7 +12,7 @@
       "description": "Your session's figures above the Claude Code prompt: how full the context is and how far off auto-compaction is, the prompt cache, your plan's limits and when they run full, the task list, and a Compact button. Beside them Ranko, the rankello® mascot, shows what Claude is doing: he types, thinks, waves when it waits for you, cheers and naps.",
       "version": "0.6.1",
       "source": "./",
-      "category": "fun"
+      "category": "productivity"
     }
   ]
 }
