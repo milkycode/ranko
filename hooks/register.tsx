@@ -46,9 +46,12 @@ type Ranko = {
   // another size keeps its old placement in the terminal and is clipped, so a
   // new size gets new Images (the pet's and the minis', whose size follows it).
   sizeSuffix: string
-  // A press on the pet: where in it the pointer took hold, and whether it has
-  // moved yet (a press that never moves is a pat).
-  grab: { offset: number; downColumn: number; isMoved: boolean } | null
+  // A press on the pet: where in it the pointer took hold, whether it has
+  // moved yet (a press that never moves is a pat), and the column the grab
+  // region stays at until the release. Moved along with the pet, the region
+  // would shift under the pointer while it reports columns against it, and
+  // the pet would jitter.
+  grab: { offset: number; downColumn: number; isMoved: boolean; regionLeft: number } | null
 }
 
 const KEY = 'ranko'
@@ -325,20 +328,27 @@ export function register(on: On, options: PluginOptions) {
     // A held move with no press before it starts the grab too: a terminal can
     // fold the press into the first move of a quick drag.
     if (message.phase === 'down' || (message.phase === 'move' && !s.grab)) {
-      s.grab = { offset: message.column - shownLeft, downColumn: message.column, isMoved: false }
+      s.grab = { offset: message.column - shownLeft, downColumn: message.column, isMoved: false, regionLeft: shownLeft }
       await noteActivity($, s)
     }
     if (message.phase !== 'down' && s.grab) {
       const { grab } = s
+      // Within a cell the pointer moves too; only a new column is worth a
+      // redraw.
+      let isChanged = false
       // It takes a column of travel to turn a press into a drag.
       if (!grab.isMoved && s.isOn('drag') && Math.abs(message.column - grab.downColumn) >= 1) {
         grab.isMoved = true
         pet.isHeld = true
+        isChanged = true
       }
       if (grab.isMoved) {
-        s.left = clamp(message.column - grab.offset, 0, s.bandColumns - s.petColumns)
+        const left = clamp(Math.round(message.column - grab.offset), 0, s.bandColumns - s.petColumns)
+        isChanged ||= left !== s.left
+        s.left = left
       }
       if (message.phase === 'up') {
+        isChanged = true
         if (grab.isMoved) {
           pet.isHeld = false
           pet.play('drop')
@@ -348,7 +358,9 @@ export function register(on: On, options: PluginOptions) {
         }
         s.grab = null
       }
-      $.ui.invalidate('ui.render')
+      if (isChanged) {
+        $.ui.invalidate('ui.render')
+      }
     }
     return next(e)
   })
@@ -413,7 +425,8 @@ export function register(on: On, options: PluginOptions) {
     })
 
     const isGrabbable = s.isOn('drag') || s.isOn('pats')
-    const grabProps: GrabProps = { left: petLeft, columns, rows }
+    const grabLeft = s.grab?.regionLeft ?? petLeft
+    const grabProps: GrabProps = { left: grabLeft, columns, rows }
 
     // The pet has its own strip; inside it the picture and, on top, the
     // invisible grab region sit at the same column.
@@ -437,7 +450,7 @@ export function register(on: On, options: PluginOptions) {
             />
           </Box>
           {isGrabbable ? (
-            <Box position="absolute" left={petLeft} top={0}>
+            <Box position="absolute" left={grabLeft} top={0}>
               <Client key="grab" module="./grab.tsx" props={grabProps} />
             </Box>
           ) : null}

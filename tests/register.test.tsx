@@ -253,19 +253,21 @@ describe('register', () => {
     expect(await petLeft()).toBe(88)
 
     // Take hold 4 columns into the pet and carry it 30 columns left. The
-    // region moves with the pet, so the release under the same screen
-    // column is 4 columns into it again.
+    // grab region stays where the press was until the release, so the
+    // pointer's columns are counted from there throughout.
     await band.pointer({ type: 'down', x: 4, y: 2, button: 'left', in: 'grab' })
     await band.pointer({ type: 'move', x: -26, y: 2, button: 'left', in: 'grab' })
     expect(await shownClip(band)).toBe('held')
-    await band.pointer({ type: 'up', x: 4, y: 2, button: 'left', in: 'grab' })
+    expect(await petLeft()).toBe(58)
+    expect((await band.find({ key: 'grab' }))?.props.props.left).toBe(88)
+    await band.pointer({ type: 'up', x: -26, y: 2, button: 'left', in: 'grab' })
     expect(await petLeft()).toBe(58)
     expect(await shownClip(band)).toBe('drop')
 
     // A drag past the edge stops at the band's left end.
     await band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'grab' })
     await band.pointer({ type: 'move', x: -500, y: 0, button: 'left', in: 'grab' })
-    await band.pointer({ type: 'up', x: -446, y: 0, button: 'left', in: 'grab' })
+    await band.pointer({ type: 'up', x: -500, y: 0, button: 'left', in: 'grab' })
     expect(await petLeft()).toBe(0)
 
     await band.unmount()
@@ -504,7 +506,7 @@ describe('register', () => {
     await band.pointer({ type: 'move', x: 4, y: 2, button: 'left', in: 'grab' })
     await band.pointer({ type: 'move', x: -26, y: 2, button: 'left', in: 'grab' })
     expect(await shownClip(band)).toBe('held')
-    await band.pointer({ type: 'up', x: 4, y: 2, button: 'left', in: 'grab' })
+    await band.pointer({ type: 'up', x: -26, y: 2, button: 'left', in: 'grab' })
     expect((await band.find({ key: 'pet' }))?.props.left).toBe(58)
     await band.unmount()
   })
