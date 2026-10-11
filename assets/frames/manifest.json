@@ -110,6 +110,11 @@
       "loop": true,
       "posture": "sit"
     },
+    "working-thinking": {
+      "frames": 48,
+      "loop": true,
+      "posture": "sit"
+    },
     "idle-plump": {
       "frames": 48,
       "loop": true

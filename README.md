@@ -15,9 +15,10 @@ question, he stops typing, stands up and waves, then says psst now and then
 until you answer. A commit, a push or a test run that passes gets a thumbs
 up. While a tool runs he holds a prop for it: a magnifier to read or search,
 a notepad to edit or keep the task list, binoculars for the web and the
-browser. He grows rounder as the context fills, a resumed session's too, and
-lets it out with a sigh on compaction, and he sits down and gets up between
-all of these rather than jumping.
+browser; while Claude thinks, he puts a finger to his chin and looks up,
+his other hand drumming on the keys. He grows rounder as the context fills,
+a resumed session's too, and lets it out with a sigh on compaction, and he
+sits down and gets up between all of these rather than jumping.
 
 Beside him the band shows how full the context is and how far off
 auto-compaction is, how long the prompt cache stays warm, your plan's 5-hour
@@ -80,7 +81,7 @@ claude --plugin-dir path/to/ranko
   `fidget-thumbs`, `fidget-wonder`, `happy`, `held`, `hello`, `idle`,
   `idle-plump`, `idle-stuffed`, `oops`, `pat`, `sit-down`, `sleepy`,
   `stand-up`, `wake-up`, `working`, `working-binoculars`, `working-magnifier`,
-  `working-notepad`, `working-plump`, `working-stuffed`.
+  `working-notepad`, `working-plump`, `working-stuffed`, `working-thinking`.
 - `/ranko list` shows every reaction, and every switch with its state. While
   you type, `/ranko` offers its reactions, its verbs and, after `on` or
   `off`, the switches.
@@ -89,8 +90,8 @@ claude --plugin-dir path/to/ranko
   `/ranko expand` or the ▾ at the line's right end opens it again. The band
   stays as you left it in later sessions.
 - `/ranko on <switch>` / `/ranko off <switch>` flips a switch: `drag`,
-  `pats`, `toolProps`, `miniRankos`, `stuffing`, `blush`, `attention`,
-  `thumbsUp`, `fidgets`, `sounds`, `stats`, `compactSummary`.
+  `pats`, `toolProps`, `thinking`, `miniRankos`, `stuffing`, `blush`,
+  `attention`, `thumbsUp`, `fidgets`, `sounds`, `stats`, `compactSummary`.
 
 Sounds play on macOS only. The cache's countdown assumes an hour when you are
 logged in with a Claude plan and five minutes with an API key: Claude Code

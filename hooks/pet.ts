@@ -11,6 +11,7 @@ export const FEATURES = [
   'drag',
   'pats',
   'toolProps',
+  'thinking',
   'miniRankos',
   'stuffing',
   'blush',
@@ -189,6 +190,9 @@ export class Pet {
   extraMinis = 0
 
   private readonly tools = new Map<string, { prop: Prop; startMs: number; isDone: boolean }>()
+  // Since when Claude has thought in the main conversation, and when it
+  // stopped; null while it doesn't.
+  private thought: { since: number; endedAt: number | null } | null = null
   private oneOff: OneOff | null = null
   private serial = 0
   private playing = ''
@@ -330,6 +334,23 @@ export class Pet {
     const call = this.tools.get(id)
     if (call) {
       call.isDone = true
+    }
+  }
+
+  /** Whether Claude is thinking now, its thought not yet ended. */
+  get isThinking() {
+    return this.thought !== null && this.thought.endedAt === null
+  }
+
+  thinkStarted(nowMs: number) {
+    if (!this.isThinking) {
+      this.thought = { since: nowMs, endedAt: null }
+    }
+  }
+
+  thinkEnded(nowMs: number) {
+    if (this.thought && this.thought.endedAt === null) {
+      this.thought.endedAt = nowMs
     }
   }
 
@@ -489,6 +510,14 @@ export class Pet {
         if (latest) {
           return `working-${latest.prop}`
         }
+      }
+      // A thought shows as long as it lasts, a quick one as long as a prop.
+      if (this.thought && this.isOn('thinking')) {
+        const { since, endedAt } = this.thought
+        if (endedAt === null || nowMs - since < PROP_HOLD_MS) {
+          return 'working-thinking'
+        }
+        this.thought = null
       }
       if (this.isOn('stuffing') && this.size !== 'normal') {
         return `working-${this.size}`

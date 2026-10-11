@@ -1074,7 +1074,27 @@ export function register(on: On, options: PluginOptions) {
     } else if (e.agentId && s.turn?.id === e.turnId) {
       s.turn = null
     }
-    const result = yield* next(e)
+    // The main conversation's thinking, until it writes, calls a tool or the
+    // response ends: Ranko thinks along.
+    const stream = next(e)
+    try {
+      for await (const chunk of stream) {
+        const { pet } = s
+        if (!e.agentId && pet) {
+          if (chunk.kind === 'thinking' && !pet.isThinking) {
+            pet.thinkStarted(await $.clock.now())
+          } else if (chunk.kind !== 'thinking' && chunk.kind !== 'engine' && pet.isThinking) {
+            pet.thinkEnded(await $.clock.now())
+          }
+        }
+        yield chunk
+      }
+    } finally {
+      if (!e.agentId && s.pet?.isThinking) {
+        s.pet.thinkEnded(await $.clock.now())
+      }
+    }
+    const result = await stream.result
     if (result.usage) {
       const now = await $.clock.now()
       s.lastResponseAt = now

@@ -99,6 +99,7 @@ pictures in `previews/`, which stay out of the repo (`blender/review.py`,
 | `fidget-thumbs` | idle fidget: thumbs up | `xbxhu067av28qff` (bottom right) |
 | `fidget-look` | idle fidget: eyes look around | none |
 | `pat`, `held`, `drop`, `idle-plump`/`-stuffed` | pats, drag, context fill | none |
+| `working-thinking` | Claude thinks: a finger at his chin, eyes up, fingers drumming | none |
 
 ## Phases
 
@@ -156,3 +157,12 @@ pictures in `previews/`, which stay out of the repo (`blender/review.py`,
    its window is in view, so a long sleep stands in for nobody looking.
    Typing in the prompt (`prompt.edit`) wakes him. `/ranko` completes its
    verbs, reactions and switches.
+11. **Thinking.** While the main conversation's response streams thinking
+   (`turn.step`'s `thinking` chunks), Ranko plays `working-thinking`: at
+   his laptop, the tip of his right index finger tapping his chin under his
+   lip, eyes up, a brow raised, the fingers of his left hand drumming on the
+   keys. A fist under his chin won't do: his arms are short, and his chin is
+   one with his belly, so the fist sat on his chest. Text, a tool call or
+   the response's end puts him back to typing; a quick thought shows as long
+   as a prop does. A tool's prop outranks it. A model whose thinking isn't
+   streamed (omitted) shows no thinking pose.

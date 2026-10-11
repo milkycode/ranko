@@ -16,6 +16,7 @@ const CLIPS: Record<string, [number, boolean]> = {
   'working-magnifier': [24, true],
   'working-notepad': [24, true],
   'working-binoculars': [24, true],
+  'working-thinking': [48, true],
   'working-plump': [24, true],
   'working-stuffed': [24, true],
   happy: [32, false],
@@ -542,6 +543,47 @@ describe('register', () => {
       finish()
       await call
       await clock.advance(100)
+      expect(await shownClip(band)).toBe('working')
+      await band.unmount()
+    })
+  }
+
+  for (const isOn of [true, false]) {
+    test(`while Claude thinks he puts a finger to his chin (thinking ${isOn ? 'on' : 'off'})`, { options: { thinking: isOn } }, async ($, on) => {
+      const clock = answerTheWorld(on)
+      let write = () => {}
+      on('turn.step', async function* ($, e) {
+        yield { kind: 'thinking' as const, index: 0, text: 'Hmm, the parser first.' }
+        await new Promise<void>(resolve => {
+          write = resolve
+        })
+        yield { kind: 'text' as const, index: 1, text: 'Done.' }
+        return {
+          turnId: e.turnId,
+          index: e.index,
+          answer: 'Done.',
+          toolUses: [],
+          stopReason: 'end_turn' as const,
+          usage: { model: 'claude', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      })
+      await $.session.start(START)
+      const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+      await $.turn.start({ text: 'think it over', turnId: 't1' })
+
+      const step = (async () => {
+        for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude', messageCount: 1 })) {
+          // The chunks pass through; what Ranko does with them counts.
+        }
+      })()
+      await clock.settle()
+      expect(await shownClip(band)).toBe(isOn ? 'working-thinking' : 'working')
+      await clock.advance(5000)
+      expect(await shownClip(band)).toBe(isOn ? 'working-thinking' : 'working')
+
+      // It writes: back to typing.
+      write()
+      await step
       expect(await shownClip(band)).toBe('working')
       await band.unmount()
     })

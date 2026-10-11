@@ -37,6 +37,13 @@
       "required": false,
       "default": true
     },
+    "thinking": {
+      "type": "boolean",
+      "title": "Thinking pose",
+      "description": "While Claude thinks before it writes or calls a tool, Ranko puts a finger to his chin and looks up, the fingers of his other hand drumming on the keys.",
+      "required": false,
+      "default": true
+    },
     "miniRankos": {
       "type": "boolean",
       "title": "Mini Rankos",

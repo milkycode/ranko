@@ -55,6 +55,8 @@ CLIPS = {
     "working-magnifier": Clip("working_magnifier", 24, True, posture="sit"),
     "working-notepad": Clip("working_notepad", 24, True, posture="sit"),
     "working-binoculars": Clip("working_binoculars", 24, True, posture="sit"),
+    # While Claude thinks, before it writes or calls a tool.
+    "working-thinking": Clip("working_thinking", 48, True, posture="sit"),
     # Rounder as the context fills, and a sigh back to size on compaction.
     "idle-plump": Clip("idle", 48, True, size="plump"),
     "idle-stuffed": Clip("idle", 48, True, size="stuffed"),
@@ -205,6 +207,23 @@ def orient_hand(p, side, along, thumb, amount=1.0):
     old = p.get(f"hand.{side}", (0, 0, 0))
     p[f"hand.{side}"] = tuple(lerp(o, n, amount) for o, n in zip(old, turn))
     p[f"hand.{side}@twist"] = lerp(p.get(f"hand.{side}@twist", 0), 0, amount)
+
+
+def point_index(p, tip, finger, thumb, pole, amount=1.0):
+    """His right index finger pointing along `finger`, its tip at `tip`, the
+    thumb side toward `thumb`: the wrist goes where that puts it."""
+    finger = Vector(finger).normalized()
+    thumb = Vector(thumb)
+    thumb = (thumb - finger * thumb.dot(finger)).normalized()
+    # The index finger leaves the hand at an angle toward the thumb.
+    h = model.hand(-1)
+    to_tip = [d for d in h.digits if d[0] == "index"][0][2] - h.palm + h.basis[0] * 0.055
+    angle = math.atan2(to_tip.dot(h.basis[1]), to_tip.dot(h.basis[0]))
+    along = finger * math.cos(angle) - thumb * math.sin(angle)
+    wrist = Vector(tip) - finger * to_tip.length
+    reach(p, "R", tuple(wrist), pole=pole, amount=amount)
+    orient_hand(p, "R", along=along, thumb=thumb, amount=amount)
+    p.hand_shape("R", "point", amount)
 
 
 def sit(p, drop=SIT_DROP):
@@ -643,18 +662,7 @@ def psst(t, frame):
     lips = pivot + turn @ (Vector(rig.from_head((-0.08, model.front(-0.08, 0.79), 0.79))) - pivot)
     face = turn @ Vector((0, -1, 0))
     tip = lips + face * 0.035 + Vector((0, 0, 0.035))
-    finger = Vector((0.1, -0.25, 1)).normalized()
-    thumb = Vector((0.3, 1, 0))
-    thumb = (thumb - finger * thumb.dot(finger)).normalized()
-    # The index finger leaves the hand at an angle toward the thumb.
-    h = model.hand(-1)
-    to_tip = [d for d in h.digits if d[0] == "index"][0][2] - h.palm + h.basis[0] * 0.055
-    angle = math.atan2(to_tip.dot(h.basis[1]), to_tip.dot(h.basis[0]))
-    along = finger * math.cos(angle) - thumb * math.sin(angle)
-    wrist = tip - finger * to_tip.length
-    reach(p, "R", tuple(wrist), pole=(1, 0.1, -1), amount=g)
-    orient_hand(p, "R", along=along, thumb=thumb, amount=g)
-    p.hand_shape("R", "point", g)
+    point_index(p, tip, finger=(0.1, -0.25, 1), thumb=(0.3, 1, 0), pole=(1, 0.1, -1), amount=g)
     p["thumb.R@curl"] = lerp(p["thumb.R@curl"], 90, g)  # tucked in, out of the way
     reach(p, "L", (0.36, 0.03, 0.43), pole=(1, 0.8, 0.1), amount=g)
     p.hand_shape("L", "fist", 0.6 * g)
@@ -769,6 +777,50 @@ def working_binoculars(t, frame):
     return p
 
 
+def working_thinking(t, frame):
+    """At his laptop, lost in thought: the tip of his right index finger at
+    his chin under his lip, tapping, eyes up and off to the side, one brow
+    raised, lips pressed shut and pushed aside, while the fingers of his left
+    hand drum on the keys."""
+    p = Pose(ARMS_DOWN)
+    p.relax_hands(curl=25, together=4)
+    sit(p)
+    p["laptop@show"] = True
+    p["laptop@offset"] = LAPTOP
+    # The head turns a little toward you and leans toward the hand, nodding
+    # slowly as he mulls.
+    head = (-3 + 1.5 * math.sin(2 * math.pi * t), 8, -14)
+    p.turn("head", *head)
+    # His chin is one with his belly, so a fist under it would sit on his
+    # chest: the finger goes under the right of his lower lip instead,
+    # wherever the head puts it, tapping twice a loop.
+    turn = Euler(tuple(map(deg, head)), "XYZ").to_matrix()
+    pivot = Vector(model._lifted(HEAD_BASE))
+    spot = Vector(rig.from_head((-0.12, model.front(-0.12, 0.725), 0.725)))
+    tap = 0.012 * max(0.0, math.sin(2 * math.pi * 2 * t))
+    tip = pivot + turn @ (spot - pivot) + turn @ Vector((0, -0.012, 0)) + Vector((0, 0, -SIT_DROP - tap))
+    point_index(p, tip, finger=(0.15, -0.2, 1), thumb=(0.3, 1, 0), pole=(1, 0.1, -1))
+    p["thumb.R@curl"] = 90  # tucked in, out of the way
+    # The left hand rests on the keys, its fingers drumming twice a loop.
+    reach(p, "L", (0.085, KEYS[1] + 0.07, KEYS[2] + 0.035), pole=(1, 0.6, -0.6))
+    p["hand.L@twist"] = 0
+    p.turn("hand.L", x=-12)
+    for i, finger in enumerate(("ring", "middle", "index")):
+        lift = max(0.0, math.sin(2 * math.pi * 2 * t - 0.9 * i)) ** 2
+        p[f"{finger}.L@curl"] = 25 - 30 * lift
+    # Eyes up and drifting, a brow raised, the lips shut and askew.
+    for side in "LR":
+        p.turn(f"eye.{side}", x=-16, z=12 + 6 * math.sin(2 * math.pi * t))
+    p.turn("brow.R", y=-10)
+    p["brow.R@offset"] = (0, 0, 0.016)
+    p.lids(blink(frame, 36))
+    p["@mouth"] = 0.04
+    p.turn("jaw", z=4)
+    for i in range(1, 5):
+        p.turn(f"tail.{i}", z=4 * math.sin(2 * math.pi * t - 0.7 * i))
+    return p
+
+
 def deflate(t, frame):
     """From stuffed back to his own size, with a big sigh: a breath in, then
     all of it out, eyes shut, arms sagging, and a shake back to normal."""
@@ -806,7 +858,8 @@ MOTIONS = {"idle": idle, "hello": hello, "working": working, "happy": happy, "oo
            "pat": pat, "held": held, "drop": drop, "blush": blush,
            "wonder": wonder, "psst": psst, "thumbs": thumbs, "look": look,
            "working_magnifier": working_magnifier, "working_notepad": working_notepad,
-           "working_binoculars": working_binoculars, "deflate": deflate}
+           "working_binoculars": working_binoculars, "working_thinking": working_thinking,
+           "deflate": deflate}
 
 
 def grown(p, size):
