@@ -2,7 +2,7 @@
 
 ![Ranko waves, sits down to work, cheers, gives a thumbs up and says psst](docs/demo.gif)
 
-Ranko, the [Rankello](https://rankello.ai) mascot, lives above the Claude Code
+Ranko, the [rankello®](https://rankello.ai) mascot, lives above the Claude Code
 prompt and reacts to what Claude is doing. He waves hello when a session
 starts; breathes, blinks and swings his tail while he waits; sits down and types on his laptop while
 Claude works; jumps for joy after a long turn; clutches his head with a sweat
@@ -40,10 +40,10 @@ will land, and he moves when you let go. On Windows the desktop app is the
 easy way to meet him; in a terminal, run Claude Code in WSL inside kitty
 (WSLg).
 
-![Ranko dozing on his cushion above the prompt in the Claude desktop app](docs/desktop.png)
+![Ranko above the prompt in the Claude desktop app, beside the context, cache, limits and session](docs/desktop.png)
 
-Meet him and Rankello at [rankello.ai](https://rankello.ai). Developed and
-maintained by [milkycode](https://www.milkycode.com).
+Meet him and rankello® at [rankello.ai](https://rankello.ai). Developed and
+maintained by [milkycode®](https://www.milkycode.com).
 
 ## Install
 
@@ -67,7 +67,12 @@ claude --plugin-dir path/to/ranko
 ## Commands and switches
 
 - `/ranko` hides or shows him.
-- `/ranko <reaction>` plays one of his reactions, e.g. `/ranko hello`.
+- `/ranko <reaction>` plays one of his reactions, e.g. `/ranko hello`:
+  `blush`, `deflate`, `doze-off`, `drop`, `fidget-look`, `fidget-psst`,
+  `fidget-thumbs`, `fidget-wonder`, `happy`, `held`, `hello`, `idle`,
+  `idle-plump`, `idle-stuffed`, `oops`, `pat`, `sit-down`, `sleepy`,
+  `stand-up`, `wake-up`, `working`, `working-binoculars`, `working-magnifier`,
+  `working-notepad`, `working-plump`, `working-stuffed`.
 - `/ranko list` shows every reaction, and every switch with its state.
 - `/ranko collapse` folds the band to one line of figures and the Compact
   button, without Ranko, as the ▴ button at the band's top right does;
