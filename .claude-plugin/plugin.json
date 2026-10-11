@@ -1,7 +1,7 @@
 {
   "name": "ranko",
   "version": "0.6.0",
-  "description": "Ranko, the Rankello monster, lives above the prompt and reacts to what Claude is doing: waves hello, works, celebrates, wobbles, blushes, naps, and can be patted and dragged.",
+  "description": "Your session's figures above the Claude Code prompt: how full the context is and how far off auto-compaction is, the prompt cache, your plan's limits and when they run full, the task list, and a Compact button. Beside them Ranko, the rankello® mascot, shows what Claude is doing: he types, thinks, waves when it waits for you, cheers and naps.",
   "author": {
     "name": "milkycode GmbH",
     "url": "https://www.milkycode.com"
@@ -10,6 +10,11 @@
   "repository": "https://github.com/milkycode/ranko",
   "keywords": [
     "mod",
+    "dashboard",
+    "context-window",
+    "auto-compact",
+    "prompt-cache",
+    "usage-limits",
     "mascot",
     "companion",
     "rankello",
@@ -96,7 +101,7 @@
     "stats": {
       "type": "boolean",
       "title": "Session stats",
-      "description": "Beside Ranko: how full the context is, whether the prompt cache is still warm and for how long, your plan's usage limits, and a Compact button that stands out once the context is 80% full.",
+      "description": "The figures of your session, beside Ranko: how full the context is and how far off auto-compaction is, how long the prompt cache stays warm, your plan's limits and when they run full, Claude's task list or the session, and a Compact button. Where Ranko can't be drawn they show without him; folded, in one line.",
       "required": false,
       "default": true
     },
