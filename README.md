@@ -2,7 +2,7 @@
 
 ![Ranko waves, sits down to work, cheers, gives a thumbs up and says psst](docs/demo.gif)
 
-Ranko, the [Rankello](https://rankello.ai) monster, lives above the Claude Code
+Ranko, the [Rankello](https://rankello.ai) mascot, lives above the Claude Code
 prompt and reacts to what Claude is doing. He waves hello when a session
 starts; breathes, blinks and swings his tail while he waits; sits down and types on his laptop while
 Claude works; jumps for joy after a long turn; clutches his head with a sweat
@@ -15,14 +15,16 @@ to edit, binoculars for the web. He grows rounder as the context fills and
 lets it out with a sigh on compaction, and he sits down and gets up between
 all of these rather than jumping.
 
-It is a Claude Code mod: frames baked in Blender, played in the terminal by
-swapping an `Image`'s source with `$.ui.blit`. Terminals with the kitty
-graphics protocol (kitty, Ghostty) only; elsewhere he stays out of the way.
-On Windows, run Claude Code in WSL inside kitty (WSLg).
+It is a Claude Code mod: frames baked in Blender, played above the prompt.
+In a terminal they play by swapping an `Image`'s source with `$.ui.blit`,
+which needs the kitty graphics protocol (kitty, Ghostty); in other terminals
+he stays out of the way. In the Claude desktop app each frame is drawn as an
+SVG, ten a second; there he can't be dragged or patted yet. On Windows the
+desktop app is the easy way to meet him; in a terminal, run Claude Code in WSL
+inside kitty (WSLg).
 
 Meet him and Rankello at [rankello.ai](https://rankello.ai). Developed and
-maintained by [milkycode GmbH](https://www.milkycode.com). The mod code comes
-from [plushie](https://github.com/xyc/plushie) by Xiaoyi Chen.
+maintained by [milkycode](https://www.milkycode.com).
 
 ## Install
 
@@ -33,6 +35,9 @@ from [plushie](https://github.com/xyc/plushie) by Xiaoyi Chen.
 
 Needs Claude Code 2.1.287 or later with mods on. Mods are rolling out; if
 `/ranko` isn't listed after installing, they aren't on for your account yet.
+
+The desktop app loads a mod installed from a terminal at the user scope:
+install it there, then start a new session in the app.
 
 To run it from a checkout instead:
 
@@ -88,4 +93,4 @@ It runs every `*.test.tsx` under the folder.
 
 MIT for the code, the Blender and sound scripts, and the frames and sounds
 they make; see [LICENSE](LICENSE). The Ranko character and the Rankello name
-are milkycode GmbH's, and the license doesn't cover them.
+are registered trademarks of milkycode GmbH, and the license doesn't cover them.

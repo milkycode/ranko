@@ -23,8 +23,16 @@ The mod never knows which character it plays. It reads
 ## Where it can show
 
 - `Image` draws only through the kitty graphics protocol: **kitty or
-  Ghostty**. Windows Terminal shows nothing. On Windows that means
-  Claude Code in WSL, inside kitty (WSLg). WezTerm is untested.
+  Ghostty**. Windows Terminal shows nothing. In a terminal on Windows that
+  means Claude Code in WSL, inside kitty (WSLg). WezTerm is untested.
+- **The desktop app** has no `Image` but draws `Svg`. Each frame is its PNG
+  inside an SVG (`<image href="data:image/png;base64,…">`), and the band is
+  drawn again for every frame, at most ten times a second. Tested on Windows
+  with the app's sessions running in WSL, where a mod installed at the user
+  scope loads too; only a new session picks it up. An `isInteractive` SVG
+  flipping frames by SMIL drew nothing there. Dragging and pats wait on how
+  the desktop reports the pointer to a `Client`.
+- The mobile app and VS Code raise no band above the prompt.
 - `$.audio.play` plays only on macOS; elsewhere Ranko is silent.
 
 ## How the model is made
@@ -97,3 +105,6 @@ pictures in `previews/`, which stay out of the repo (`blender/review.py`,
    (`-plump`, `-stuffed`) and `deflate`.
 7. **Publish.** A public repo that is its own marketplace, a README with a
    demo GIF, and a link to [rankello.ai](https://rankello.ai). *Done.*
+8. **Desktop app.** Every clip, the minis and the switches drawn as SVG in
+   the desktop band. Next: dragging and pats there, once a probe shows how a
+   `Client` gets the pointer on the desktop.

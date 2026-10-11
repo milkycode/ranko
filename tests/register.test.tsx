@@ -62,7 +62,9 @@ const COMMAND = { origin: { kind: 'composer' }, presentation: { isFullscreen: fa
 function answerTheWorld(on: On, contextPercent = 10, manifest = MANIFEST) {
   const clock = mock.clock(on)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('fs.read', () => ({ value: manifest }))
+  // A frame's bytes are its path, so a test can tell which frame the
+  // desktop drew.
+  on('fs.read', ($, e) => ({ value: e.as === 'bytes' ? { base64: btoa(e.path) } : manifest }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('store.get', () => ({ value: undefined }))
   on('store.set', () => ({ value: undefined }))
@@ -77,12 +79,27 @@ function answerTheWorld(on: On, contextPercent = 10, manifest = MANIFEST) {
 }
 
 type Band = Mounted<'terminal', 'AbovePrompt'>
+type DesktopBand = Mounted<'desktop', 'AbovePrompt'>
 
 /** The clip the pet shows: the folder of the frame its Image draws. */
 async function shownClip(band: Band) {
   await band.redraw()
   const pet = await band.find({ key: 'ranko' })
   return (pet?.props.source as { file: string } | undefined)?.file.match(/frames\/([\w-]+)\//)?.[1]
+}
+
+/** The props of the Svg the desktop draws in the Box keyed `key`. */
+async function svgIn(band: DesktopBand, key: string) {
+  const box = await band.find({ key })
+  const svg = box?.children.find(child => (child as { type?: string }).type === 'Svg')
+  return (svg as { props: { source: string; width?: number; height?: number } } | undefined)?.props
+}
+
+/** The frame the desktop draws in an element: the file inside its SVG. */
+async function desktopFile(band: DesktopBand, key = 'ranko') {
+  await band.redraw()
+  const base64 = (await svgIn(band, key))?.source.match(/base64,([^"]+)"/)?.[1]
+  return base64 === undefined ? undefined : atob(base64)
 }
 
 const complete = (
@@ -95,7 +112,7 @@ const complete = (
   $.turn.complete({ answer: '', durationMs, isAborted: reason === 'aborted', turnId, reason, agentId } as never)
 
 describe('register', () => {
-  test('the terminal band draws the pet, the desktop band is left alone', async ($, on) => {
+  test('the terminal band draws the pet as an Image, the desktop band as an SVG', async ($, on) => {
     answerTheWorld(on)
     await $.session.start(START)
 
@@ -106,9 +123,43 @@ describe('register', () => {
     expect(String((pet?.props.source as { file: string }).file)).toMatch(/frames\/idle\/000\.png$/)
     await terminal.unmount()
 
+    // 12x6 cells of 8x16 px.
     const desktop = await $.ui.mount({ ...BAND, surface: 'desktop' })
-    expect(await desktop.find({ key: 'ranko' })).toBeUndefined()
+    const svg = await svgIn(desktop, 'ranko')
+    expect(svg?.width).toBe(96)
+    expect(svg?.height).toBe(96)
+    expect(svg?.source).toContain('href="data:image/png;base64,')
+    expect(await desktopFile(desktop)).toMatch(/frames\/idle\/000\.png$/)
     await desktop.unmount()
+  })
+
+  test('on the desktop the frames move with the clock and the clip follows the turn', async ($, on) => {
+    const clock = answerTheWorld(on)
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+    expect(await desktopFile(band)).toMatch(/idle\/000\.png$/)
+    // Half a second at 24 frames a second.
+    await clock.advance(500)
+    expect(await desktopFile(band)).toMatch(/idle\/01[12]\.png$/)
+
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    expect(await desktopFile(band)).toMatch(/working\/000\.png$/)
+    await band.unmount()
+  })
+
+  test('on the desktop a survey or /ranko keeps the pet out of the way', async ($, on) => {
+    answerTheWorld(on)
+    await $.session.start(START)
+
+    const survey = await $.ui.mount({ ...BAND, surface: 'desktop', props: { ...BAND.props, hasSurvey: true } })
+    expect(await survey.find({ type: 'Svg' })).toBeUndefined()
+    await survey.unmount()
+
+    await $.command.run({ ...COMMAND, command: 'ranko', args: '' })
+    const hidden = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await hidden.find({ type: 'Svg' })).toBeUndefined()
+    await hidden.unmount()
   })
 
   test('he waves hello when a session starts, then idles', async ($, on) => {
@@ -259,7 +310,7 @@ describe('register', () => {
     await band.pointer({ type: 'move', x: -26, y: 2, button: 'left', in: 'grab' })
     expect(await shownClip(band)).toBe('held')
     expect(await petLeft()).toBe(58)
-    expect((await band.find({ key: 'grab' }))?.props.props.left).toBe(88)
+    expect(((await band.find({ key: 'grab' }))?.props.props as { left: number } | undefined)?.left).toBe(88)
     await band.pointer({ type: 'up', x: -26, y: 2, button: 'left', in: 'grab' })
     expect(await petLeft()).toBe(58)
     expect(await shownClip(band)).toBe('drop')
@@ -377,6 +428,26 @@ describe('register', () => {
       await band.unmount()
     })
   }
+
+  test('on the desktop a mini Ranko stands beside him and fades as it leaves', async ($, on) => {
+    const clock = answerTheWorld(on)
+    on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+    await $.agent.spawn({ tool_use_id: 'u1', prompt: 'look around', description: 'look', subagentType: 'Explore' } as never)
+    expect(await desktopFile(band, 'mini-a1')).toMatch(/working\/\d{3}\.png$/)
+    expect((await svgIn(band, 'mini-a1'))?.width).toBe(48)
+
+    await complete($, 'agent-turn', 3000, 'answer', 'a1')
+    await clock.advance(200)
+    await band.redraw()
+    expect((await svgIn(band, 'mini-a1'))?.source).toMatch(/opacity="0\.\d+"/)
+    await clock.advance(1300)
+    await band.redraw()
+    expect(await band.find({ key: 'mini-a1' })).toBeUndefined()
+    await band.unmount()
+  })
 
   test('a full context stuffs Ranko and compaction lets it out', async ($, on) => {
     answerTheWorld(on, 85)

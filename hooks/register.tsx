@@ -12,9 +12,12 @@ import type { Feature, Manifest } from './pet'
  * by swapping one Image's source on a timer, the clip picked by what the
  * main conversation is doing (pet.ts).
  *
- * Only the terminal draws pixels; elsewhere, or in a terminal without an
- * image protocol, the band is left as it was. Every reaction beyond the base
- * moods is a `userConfig` switch, on unless turned off.
+ * The terminal draws pixels through the Image. The desktop app has no
+ * Image: there each frame is a PNG inside an SVG, and the band is drawn again
+ * for every frame, which it does up to ten times a second. Elsewhere, or in a
+ * terminal without an image protocol, the band is left as it was. Every
+ * reaction beyond the base moods is a `userConfig` switch, on unless turned
+ * off.
  */
 
 type Host = {
@@ -37,6 +40,10 @@ type Ranko = {
   // Set when the terminal draws the Image's alt instead of pixels: the pet
   // stops drawing for the rest of the session.
   isUnsupported: boolean
+  // Set while the desktop app shows the pet: each tick redraws its band.
+  isOnDesktop: boolean
+  // The frames the desktop drew lately, base64 by file, the oldest first.
+  frames: Map<string, string>
   // The band column of the pet's left edge; null keeps it at the right end.
   left: number | null
   bandColumns: number
@@ -67,12 +74,59 @@ const SOUNDS = new Set(['hello', 'pat', 'happy', 'oops', 'blush', 'held', 'drop'
 const SOUND_GAIN = 0.6
 // Below this many rows Ranko is too small to read and isn't drawn at all.
 const MIN_ROWS = 4
+// A terminal cell in CSS px, so that on the desktop Ranko keeps the size and
+// shape the manifest gives him in cells.
+const DESKTOP_CELL = { width: 8, height: 16 }
+// How many frames the desktop keeps read: a few clips' worth.
+const FRAME_CACHE = 256
+// The most an Svg's source may hold.
+const SVG_LIMIT = 131072
 
 const clamp = (value: number, low: number, high: number) =>
   Math.max(low, Math.min(high, Math.round(value)))
 
 const fileOf = (s: Ranko, clip: string, frame: number) =>
   `${s.root}/assets/frames/${clip}/${String(frame).padStart(3, '0')}.png`
+
+/** A frame's bytes, base64, from the desktop's cache or the file. */
+async function frameBytes($: EngineInterface, s: Ranko, file: string) {
+  const cached = s.frames.get(file)
+  if (cached !== undefined) {
+    s.frames.delete(file)
+    s.frames.set(file, cached)
+    return cached
+  }
+  try {
+    const { base64 } = await $.fs.read(file, { as: 'bytes' })
+    s.frames.set(file, base64)
+    const oldest = s.frames.keys().next().value
+    if (s.frames.size > FRAME_CACHE && oldest !== undefined) {
+      s.frames.delete(oldest)
+    }
+    return base64
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A frame as the desktop draws it: the PNG inside an SVG that the Svg element
+ * scales to the size it is given, faded by `opacity` (a mini walking off).
+ * Null when the file can't be read or the SVG would be over the limit.
+ */
+async function desktopFrame($: EngineInterface, s: Ranko, file: string, opacity = 1) {
+  const base64 = await frameBytes($, s, file)
+  if (base64 === null || !s.manifest) {
+    return null
+  }
+  const width = s.manifest.columns * DESKTOP_CELL.width
+  const height = s.manifest.rows * DESKTOP_CELL.height
+  const fade = opacity < 1 ? ` opacity="${opacity.toFixed(2)}"` : ''
+  const source =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
+    `<image width="${width}" height="${height}"${fade} href="data:image/png;base64,${base64}"/></svg>`
+  return source.length <= SVG_LIMIT ? source : null
+}
 
 /** The pet's left column in a band this wide: where it was left, or the right end. */
 const leftIn = (s: Ranko, columns: number, petColumns: number) =>
@@ -138,24 +192,29 @@ function start($: EngineInterface, s: Ranko) {
 
 async function tick(s: Ranko) {
   const { host, pet, requestId } = s
-  if (!host || !pet || !requestId || !s.isShown || s.isUnsupported) {
+  const isOnTerminal = requestId !== null && !s.isUnsupported
+  if (!host || !pet || !s.isShown || !(isOnTerminal || s.isOnDesktop)) {
     return
   }
   pet.sync(await host.now())
 
-  const blits = [host.blit(requestId, KEY + s.sizeSuffix, fileOf(s, pet.clip, pet.fileFrame()))]
-  const working = pet.framesOf('working')
-  for (const mini of pet.minis) {
-    blits.push(host.blit(requestId, `mini-${mini.id}${s.sizeSuffix}`, fileOf(s, 'working', mini.frame % working)))
-  }
-  const [main] = await Promise.all(blits)
+  if (isOnTerminal) {
+    const blits = [host.blit(requestId, KEY + s.sizeSuffix, fileOf(s, pet.clip, pet.fileFrame()))]
+    const working = pet.framesOf('working')
+    for (const mini of pet.minis) {
+      blits.push(host.blit(requestId, `mini-${mini.id}${s.sizeSuffix}`, fileOf(s, 'working', mini.frame % working)))
+    }
+    const [main] = await Promise.all(blits)
 
-  if (main?.deny && /alt/i.test(main.deny)) {
-    s.isUnsupported = true
-    host.invalidate()
-    return
+    if (main?.deny && /alt/i.test(main.deny)) {
+      s.isUnsupported = true
+      host.invalidate()
+      return
+    }
   }
-  if (pet.advance()) {
+  // The desktop has no blit: each new frame is a redraw, and redraws asked
+  // for faster than it takes them fold into one.
+  if (pet.advance() || s.isOnDesktop) {
     host.invalidate()
   }
 }
@@ -177,6 +236,8 @@ export function register(on: On, options: PluginOptions) {
     requestId: null,
     isShown: true,
     isUnsupported: false,
+    isOnDesktop: false,
+    frames: new Map(),
     left: null,
     bandColumns: 0,
     petColumns: 0,
@@ -367,6 +428,55 @@ export function register(on: On, options: PluginOptions) {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e)
+
+    // The desktop app: Ranko at the band's right end, the minis to his left,
+    // each frame an SVG. No dragging or patting there yet.
+    if (e.surface === 'desktop') {
+      await start($, s)
+      const { manifest, pet } = s
+      s.isOnDesktop = s.isShown && !e.props.hasSurvey && manifest !== null && pet !== null
+      if (!s.isOnDesktop || !manifest || !pet) {
+        return below
+      }
+      pet.sync(await $.clock.now())
+
+      const working = pet.framesOf('working')
+      const [main, ...minis] = await Promise.all([
+        desktopFrame($, s, fileOf(s, pet.clip, pet.fileFrame())),
+        ...pet.minis.map(mini =>
+          desktopFrame($, s, fileOf(s, 'working', mini.frame % working), 1 - (mini.leaving ?? 0) / LEAVE_FRAMES),
+        ),
+      ])
+      if (!main) {
+        return below
+      }
+
+      const { Box, Svg, Text } = $.ui.resolve(e)
+      const width = manifest.columns * DESKTOP_CELL.width
+      const height = manifest.rows * DESKTOP_CELL.height
+      return (
+        <Box flexDirection="column">
+          {below}
+          <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end" gap={1}>
+            {pet.extraMinis > 0 ? <Text dimColor>+{pet.extraMinis}</Text> : null}
+            {pet.minis
+              .map((mini, i) => {
+                const source = minis[i]
+                return source ? (
+                  <Box key={`mini-${mini.id}`}>
+                    <Svg source={source} alt="A mini Ranko at work" width={width / 2} height={height / 2} />
+                  </Box>
+                ) : null
+              })
+              .reverse()}
+            <Box key={KEY}>
+              <Svg source={main} alt="Ranko" width={width} height={height} />
+            </Box>
+          </Box>
+        </Box>
+      )
+    }
+
     if (e.surface !== 'terminal') {
       return below
     }
