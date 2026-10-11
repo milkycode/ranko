@@ -119,3 +119,8 @@ pictures in `previews/`, which stay out of the repo (`blender/review.py`,
    whole. The limits come from the usage endpoint `/usage` reads
    (`api.anthropic.com/api/oauth/usage`, with the session's login through
    `$.session.authorize`), once a minute, so other sessions count too.
+   Each limit says when it runs full at its pace: the five hours' over the
+   last half hour of those readings, the week's over the week so far. The
+   context says how far auto-compaction is (the breakdown's
+   `autoCompactThreshold`, estimated locally), and TodoWrite and the Task
+   tools' calls give the task list's row.

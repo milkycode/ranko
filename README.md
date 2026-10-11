@@ -15,15 +15,17 @@ to edit, binoculars for the web. He grows rounder as the context fills and
 lets it out with a sigh on compaction, and he sits down and gets up between
 all of these rather than jumping.
 
-Beside him the band shows how full the context is, how long the prompt cache
-stays warm, and your plan's 5-hour and weekly limits with their reset times,
-each with a bar. Beside the context sits a Compact button from 15% on, which
-stands out once the context is 80% full. The figures are read again every 10
-seconds and after every response; the limits come from where `/usage` reads
-them, once a minute, so what your other sessions use shows up too. After a
-compaction, by the button or `/compact`, the conversation shows the summary
-Claude carries on with, under a line with the tokens before and after; Claude
-doesn't read those lines.
+Beside him the band shows how full the context is and how far off
+auto-compaction is, how long the prompt cache stays warm, your plan's 5-hour
+and weekly limits with their reset times and when each runs full at the pace
+it is used, and, while Claude keeps a task list, how far it has come: each
+with a bar. Beside the context sits a Compact button from 15% on, which stands
+out in the last tenth before auto-compaction (or from 80% without it). The
+figures are read again every 10 seconds and after every response; the limits
+come from where `/usage` reads them, once a minute, so what your other
+sessions use shows up too. After a compaction, by the button or `/compact`,
+the conversation shows the summary Claude carries on with, under a line with
+the tokens before and after; Claude doesn't read those lines.
 
 It is a Claude Code mod: frames baked in Blender, played above the prompt.
 In a terminal they play by swapping an `Image`'s source with `$.ui.blit`,

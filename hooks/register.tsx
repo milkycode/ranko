@@ -17,7 +17,6 @@ import type { GrabMessage, GrabProps } from './grab'
 import { FEATURES, LEAVE_FRAMES, PROP_FOR_TOOL, Pet, isManifest, moodOf, sizeFor } from './pet'
 import type { Feature, Manifest, Mini } from './pet'
 import {
-  COMPACT_AT,
   COMPACT_FROM,
   bar,
   cacheColor,
@@ -25,13 +24,17 @@ import {
   cacheTtl,
   contextOf,
   fillColor,
+  isNearlyFull,
+  isSameReset,
   limitsOf,
   logChunks,
+  nextTasks,
   planLimits,
   summaryOf,
+  tasksOf,
   tokens,
 } from './stats'
-import type { CacheReading } from './stats'
+import type { CacheReading, LimitSample, Task } from './stats'
 
 /**
  * Ranko above the prompt: frames baked by blender/bake.py, played
@@ -109,6 +112,13 @@ type Ranko = {
   // Compactions logged so far: the Compact button logs its own when the
   // session.compact hook didn't.
   compactLogs: number
+  // The token count auto-compaction runs at; null when it is off or unread.
+  autoCompactAt: number | null
+  // The five-hour window's readings from the usage endpoint, for its pace;
+  // a new window starts them over.
+  fiveHour: { resetsAt?: string; samples: LimitSample[] }
+  // Claude's task list in the main conversation.
+  tasks: Task[]
 }
 
 type StatsElements = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
@@ -139,7 +149,7 @@ const SVG_LIMIT = 131072
 // The stats beside Ranko take at least this many columns and at most this
 // many, kept this far from him.
 const STATS_MIN_COLUMNS = 34
-const STATS_MAX_COLUMNS = 60
+const STATS_MAX_COLUMNS = 84
 const STATS_GAP = 2
 const STATS_LABEL_COLUMNS = 8
 // How often the stats read the session again, and ask the usage endpoint for
@@ -147,6 +157,10 @@ const STATS_LABEL_COLUMNS = 8
 const STATS_EVERY_MS = 10_000
 const PLAN_EVERY_MS = 60_000
 const PLAN_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+// The five-hour window's readings are kept this long, for its recent pace.
+const SAMPLES_KEPT_MS = 60 * 60_000
+// The tools that keep Claude's task list.
+const TASK_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'])
 
 const clamp = (value: number, low: number, high: number) =>
   Math.max(low, Math.min(high, Math.round(value)))
@@ -267,10 +281,29 @@ async function readPlan($: EngineInterface, s: Ranko) {
     })
     const limits = response.ok ? planLimits(response.text) : null
     if (limits) {
-      s.plan = { limits, at: await $.clock.now() }
+      const at = await $.clock.now()
+      s.plan = { limits, at }
+      const fiveHour = limits.find(limit => limit.kind === 'five_hour')
+      if (fiveHour) {
+        const isSameWindow = isSameReset(s.fiveHour.resetsAt, fiveHour.resetsAt)
+        const kept = isSameWindow ? s.fiveHour.samples.filter(sample => at - sample.at <= SAMPLES_KEPT_MS) : []
+        s.fiveHour = { resetsAt: fiveHour.resetsAt, samples: [...kept, { at, percent: fiveHour.percentUsed }] }
+      }
     }
   } catch {
     // Offline, or the traffic is off: the session's own reading stands.
+  }
+}
+
+/** Reads where auto-compaction runs, from the context's breakdown, estimated locally. */
+async function readAutoCompact($: EngineInterface, s: Ranko) {
+  try {
+    const { breakdown } = (await $.session.usage({ breakdown: 'summary' })).context
+    if (breakdown) {
+      s.autoCompactAt = breakdown.isAutoCompactEnabled ? (breakdown.autoCompactThreshold ?? null) : null
+    }
+  } catch {
+    // No reading this time; the last one stands.
   }
 }
 
@@ -328,15 +361,18 @@ async function compactNow($: EngineInterface, s: Ranko) {
 
 /**
  * The stats beside Ranko, the same on every surface: a row each for the
- * context, the cache and the limits, a dim label, a bar and the reading. The
- * context's row ends in the Compact button once there is something to
- * compact, and it stands out once the context is nearly full.
+ * context, the cache, the limits and Claude's task list while there is one, a
+ * dim label, a bar and the reading. The context's row ends in the Compact
+ * button once there is something to compact, and it stands out once the
+ * context is nearly full; the limits' bar turns red when the five-hour window
+ * would run full before it resets.
  */
 function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: number, onCompact: () => void) {
   const { Box, Text, Button } = el
-  const context = contextOf(s.usage)
+  const context = contextOf(s.usage, s.autoCompactAt)
   const cache = cacheOf(s.cache, cacheTtl(s.isPlan), nowMs)
-  const limits = limitsOf(limitsNow(s), nowMs)
+  const limits = limitsOf(limitsNow(s), nowMs, s.fiveHour.samples)
+  const tasks = tasksOf(s.tasks, (s.pet?.runningTurns.size ?? 0) > 0)
   const isCompactable = s.isCompacting || (context?.percent ?? 0) >= COMPACT_FROM
   // A dim label, a bar in the reading's color (or dim, empty, with none), the
   // reading, and what else the row holds.
@@ -356,7 +392,7 @@ function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: 
     <Button
       key="compact"
       label={s.isCompacting ? 'Compacting…' : 'Compact'}
-      variant={(context?.percent ?? 0) >= COMPACT_AT ? 'primary' : 'secondary'}
+      variant={context && isNearlyFull(context, s.autoCompactAt) ? 'primary' : 'secondary'}
       onPress={onCompact}
     />
   ) : undefined
@@ -366,7 +402,10 @@ function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: 
         ? row('context', 'Context', context.percent, fillColor(context.percent), context.text, compact)
         : row('context', 'Context', 0, null, 'no reading yet', compact)}
       {row('cache', 'Cache', cache.percent, cache.percent > 0 ? cacheColor(cache.percent) : null, cache.text)}
-      {limits ? row('limits', 'Limits', limits.percent, fillColor(limits.percent), limits.text) : null}
+      {limits
+        ? row('limits', 'Limits', limits.percent, limits.isRunningOut ? 'error' : fillColor(limits.percent), limits.text)
+        : null}
+      {tasks ? row('tasks', 'Tasks', tasks.percent, 'suggestion', tasks.text) : null}
     </Box>
   )
 }
@@ -436,12 +475,12 @@ function start($: EngineInterface, s: Ranko) {
     })
     $.clock.every(PLAN_EVERY_MS, () => {
       if (s.isOn('stats') && s.isShown) {
-        void readPlan($, s).then(() => host.invalidate())
+        void Promise.all([readPlan($, s), readAutoCompact($, s)]).then(() => host.invalidate())
       }
     })
     if (s.isOn('stats')) {
       await readUsage($, s)
-      void readPlan($, s).then(() => host.invalidate())
+      void Promise.all([readPlan($, s), readAutoCompact($, s)]).then(() => host.invalidate())
     }
   })()
   return s.starting
@@ -507,6 +546,9 @@ export function register(on: On, options: PluginOptions) {
     cache: null,
     isCompacting: false,
     compactLogs: 0,
+    autoCompactAt: null,
+    fiveHour: { samples: [] },
+    tasks: [],
   }
 
   on('session.start', async ($, e, next) => {
@@ -595,22 +637,29 @@ export function register(on: On, options: PluginOptions) {
 
   on('tool.call', async ($, e, next) => {
     const { pet } = s
-    // A subagent's tool calls are its own business: no prop, no wobble.
-    if (e.agentId || !pet) {
+    // A subagent's tool calls are its own business: no prop, no wobble, no
+    // task of the list.
+    if (e.agentId) {
       return next(e)
     }
     const prop = PROP_FOR_TOOL[e.tool]
-    if (prop) {
+    if (pet && prop) {
       pet.toolStarted(e.tool_use_id, prop, await $.clock.now())
     }
     try {
       const result = await next(e)
       if (result.deny !== undefined || result.isError) {
-        pet.play('oops')
+        pet?.play('oops')
+      } else if (TASK_TOOLS.has(e.tool)) {
+        // Claude's task list, as TodoWrite and the Task tools keep it.
+        s.tasks = nextTasks(s.tasks, e.tool, e as unknown as Record<string, unknown>, result.result)
+        if (s.isOn('stats')) {
+          $.ui.invalidate('ui.render')
+        }
       }
       return result
     } finally {
-      pet.toolEnded(e.tool_use_id)
+      pet?.toolEnded(e.tool_use_id)
     }
   })
 
@@ -676,7 +725,7 @@ export function register(on: On, options: PluginOptions) {
       logCompaction($, s, e.messages, result, tokensBefore)
     }
     if (s.isOn('stats')) {
-      void readUsage($, s).then(() => $.ui.invalidate('ui.render'))
+      void Promise.all([readUsage($, s), readAutoCompact($, s)]).then(() => $.ui.invalidate('ui.render'))
     }
     return result
   })

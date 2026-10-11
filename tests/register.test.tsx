@@ -59,7 +59,13 @@ const COMMAND = { origin: { kind: 'composer' }, presentation: { isFullscreen: fa
  * commands, blits, turns, the context's fill, and an empty band, which is
  * what the engine draws there.
  */
-function answerTheWorld(on: On, contextPercent = 10, manifest = MANIFEST, rateLimits: SessionRateLimit[] = []) {
+function answerTheWorld(
+  on: On,
+  contextPercent = 10,
+  manifest = MANIFEST,
+  rateLimits: SessionRateLimit[] = [],
+  autoCompactThreshold?: number,
+) {
   const clock = mock.clock(on)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   // A frame's bytes are its path, so a test can tell which frame the
@@ -72,10 +78,18 @@ function answerTheWorld(on: On, contextPercent = 10, manifest = MANIFEST, rateLi
   on('ui.render', () => h(Fragment, null) as RenderElement)
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  on('session.usage', () => ({
+  on('session.usage', ($, e) => ({
     value: {
       startedAt: 0,
-      context: { window: 200000, percent: contextPercent, tokens: contextPercent * 2000 },
+      context: {
+        window: 200000,
+        percent: contextPercent,
+        tokens: contextPercent * 2000,
+        // The breakdown, where it was asked for, carries where auto-compaction runs.
+        ...(e.breakdown && autoCompactThreshold !== undefined
+          ? { breakdown: { isAutoCompactEnabled: true, autoCompactThreshold } as never }
+          : {}),
+      },
       rateLimits,
     },
   }))
@@ -578,6 +592,36 @@ describe('register', () => {
     await band.redraw()
     expect(await shownLimits(band)).toBe('5h 68% 7d 62%')
     expect(await band.find({ type: 'Text', text: '59m left · 90% read' })).toBeDefined()
+    await band.unmount()
+  })
+
+  test('the context row says how far auto-compaction is; Compact stands out in its last tenth', async ($, on) => {
+    answerTheWorld(on, 76, MANIFEST, [], 167000)
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    await band.redraw()
+    expect(await band.find({ type: 'Text', text: '76% · 152k / 200k · auto-compact in 15k' })).toBeDefined()
+    expect((await band.find({ key: 'compact' }))?.props.variant).toBe('primary')
+    await band.unmount()
+  })
+
+  test("Claude's task list gets a row of its own while there is one", async ($, on) => {
+    answerTheWorld(on)
+    on('tool.call', () => ({ result: {}, text: 'ok' }))
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await band.find({ key: 'tasks' })).toBeUndefined()
+
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await $.tool.call({
+      tool: 'TodoWrite',
+      todos: [
+        { content: 'Write tests', status: 'completed', activeForm: 'Writing tests' },
+        { content: 'Fix the bug', status: 'in_progress', activeForm: 'Fixing the bug' },
+      ],
+    } as never)
+    await band.redraw()
+    expect(await band.find({ type: 'Text', text: '1/2 · Fixing the bug' })).toBeDefined()
     await band.unmount()
   })
 
