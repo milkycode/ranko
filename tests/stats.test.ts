@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { cacheText, limitsText, logChunks, span, summaryOf, tokens } from '../hooks/stats'
+import { cacheColor, cacheOf, fillColor, limitsOf, logChunks, planLimits, span, summaryOf, tokens } from '../hooks/stats'
 
 describe('stats', () => {
   test('token counts and spans read short', () => {
@@ -13,16 +13,45 @@ describe('stats', () => {
     expect(span(90 * 60_000)).toBe('1h 30m')
   })
 
-  test('the cache is warm for its stretch after a request, then expired', () => {
-    const reading = { at: 0, input: 0, read: 0, written: 0 }
-    expect(cacheText(null, 300_000, 0)).toBe('no request yet')
-    expect(cacheText(reading, 300_000, 60_000)).toBe('warm · 4m left')
-    expect(cacheText(reading, 300_000, 420_000)).toBe('expired 2m ago')
+  test('the cache is warm for its stretch after a request, its bar running down, then expired', () => {
+    const reading = { at: 0, input: 100, read: 9000, written: 900 }
+    expect(cacheOf(null, 300_000, 0)).toEqual({ percent: 0, text: 'no request yet' })
+    expect(cacheOf(reading, 300_000, 60_000)).toEqual({ percent: 80, text: '4m left · 90% read' })
+    expect(cacheOf(reading, 300_000, 270_000)).toEqual({ percent: 10, text: '<1m left · 90% read' })
+    expect(cacheOf(reading, 300_000, 420_000)).toEqual({ percent: 0, text: 'expired 2m ago' })
   })
 
-  test('limits name their window and reset; none, no line', () => {
-    expect(limitsText([], 0)).toBeNull()
-    expect(limitsText([{ kind: 'spend_limit', percentUsed: 7.5 }], 0)).toBe('spend 8%')
+  test('bars turn yellow, then red: a used-up share as it fills, the cache as its time runs out', () => {
+    expect([10, 50, 79, 80].map(fillColor)).toEqual(['success', 'warning', 'warning', 'error'])
+    expect([100, 50, 49, 25, 24].map(cacheColor)).toEqual(['success', 'success', 'warning', 'warning', 'error'])
+  })
+
+  test('limits name their window and its reset after a mark; the bar is the session window', () => {
+    expect(limitsOf([], 0)).toBeNull()
+    expect(limitsOf([{ kind: 'spend_limit', percentUsed: 7.5 }], 0)).toEqual({ percent: 7.5, text: 'spend 8%' })
+
+    const fiveHours = '2030-01-07T17:40:00Z'
+    const limits = [
+      { kind: 'seven_day', percentUsed: 41, resetsAt: '2030-01-13T09:00:00Z' },
+      { kind: 'five_hour', percentUsed: 23, resetsAt: fiveHours },
+    ]
+    const shown = limitsOf(limits, Date.parse(fiveHours) - 2 * 3_600_000)
+    expect(shown?.percent).toBe(23)
+    expect(shown?.text).toMatch(/^7d 41% ↻ \w{3} \d\d:\d\d · 5h 23% ↻ \d\d:\d\d$/)
+  })
+
+  test("the usage endpoint's windows become limits; a body without them, none", () => {
+    const body = JSON.stringify({
+      five_hour: { utilization: 68.0, resets_at: '2030-01-07T16:40:00+00:00' },
+      seven_day: { utilization: 62.0, resets_at: '2030-01-12T10:00:00+00:00' },
+      seven_day_opus: null,
+    })
+    expect(planLimits(body)).toEqual([
+      { kind: 'five_hour', percentUsed: 68, resetsAt: '2030-01-07T16:40:00+00:00' },
+      { kind: 'seven_day', percentUsed: 62, resetsAt: '2030-01-12T10:00:00+00:00' },
+    ])
+    expect(planLimits('{"five_hour":null}')).toBeNull()
+    expect(planLimits('not json')).toBeNull()
   })
 
   test('a long text is cut between paragraphs, and inside one only when it must be', () => {

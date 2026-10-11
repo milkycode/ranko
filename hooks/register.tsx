@@ -9,13 +9,28 @@ import type {
   RenderElement,
   SessionCompacted,
   SessionMessage,
+  SessionRateLimit,
   SessionUsage,
 } from 'claude-code'
 
 import type { GrabMessage, GrabProps } from './grab'
 import { FEATURES, LEAVE_FRAMES, PROP_FOR_TOOL, Pet, isManifest, moodOf, sizeFor } from './pet'
 import type { Feature, Manifest, Mini } from './pet'
-import { COMPACT_AT, bar, cacheText, cacheTtl, contextOf, limitsText, logChunks, summaryOf, tokens } from './stats'
+import {
+  COMPACT_AT,
+  COMPACT_FROM,
+  bar,
+  cacheColor,
+  cacheOf,
+  cacheTtl,
+  contextOf,
+  fillColor,
+  limitsOf,
+  logChunks,
+  planLimits,
+  summaryOf,
+  tokens,
+} from './stats'
 import type { CacheReading } from './stats'
 
 /**
@@ -81,6 +96,13 @@ type Ranko = {
   grab: { offset: number; downColumn: number; isMoved: boolean; regionLeft: number } | null
   // The last reading of the context and the plan's limits, for the stats.
   usage: SessionUsage | null
+  // The plan's limits as the usage endpoint last had them, every session of
+  // the account counted, and when; null without a Claude plan login.
+  plan: { limits: SessionRateLimit[]; at: number } | null
+  isPlan: boolean
+  // When the last response of this session came, a subagent's too: the
+  // limits it reported are as fresh. Null before the first.
+  lastResponseAt: number | null
   // What the main conversation's last request did with the prompt cache.
   cache: CacheReading | null
   isCompacting: boolean
@@ -120,9 +142,11 @@ const STATS_MIN_COLUMNS = 34
 const STATS_MAX_COLUMNS = 60
 const STATS_GAP = 2
 const STATS_LABEL_COLUMNS = 8
-// How often the stats read the session again between turns: the cache's
-// countdown moves by the minute.
-const STATS_EVERY_MS = 30_000
+// How often the stats read the session again, and ask the usage endpoint for
+// the plan's limits, which other sessions use up too.
+const STATS_EVERY_MS = 10_000
+const PLAN_EVERY_MS = 60_000
+const PLAN_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 
 const clamp = (value: number, low: number, high: number) =>
   Math.max(low, Math.min(high, Math.round(value)))
@@ -226,6 +250,34 @@ async function readUsage($: EngineInterface, s: Ranko) {
   s.usage = await $.session.usage().catch(() => s.usage)
 }
 
+/**
+ * Asks Anthropic's usage endpoint, as /usage does, for the plan's limits
+ * with the session's own login; an API key or another provider has none.
+ */
+async function readPlan($: EngineInterface, s: Ranko) {
+  try {
+    const auth = await $.session.authorize()
+    s.isPlan = auth?.kind === 'bearer'
+    if (!auth || !s.isPlan) {
+      return
+    }
+    const response = await $.http.fetch(PLAN_USAGE_URL, {
+      headers: { 'anthropic-beta': 'oauth-2025-04-20' },
+      auth: auth.handle,
+    })
+    const limits = response.ok ? planLimits(response.text) : null
+    if (limits) {
+      s.plan = { limits, at: await $.clock.now() }
+    }
+  } catch {
+    // Offline, or the traffic is off: the session's own reading stands.
+  }
+}
+
+/** The limits to show: the endpoint's, unless a response of this session came since. */
+const limitsNow = (s: Ranko) =>
+  s.plan && (s.lastResponseAt === null || s.plan.at > s.lastResponseAt) ? s.plan.limits : (s.usage?.rateLimits ?? [])
+
 /** Logs a compaction: the tokens before and after, then the summary in lines drawn whole. */
 function logCompaction(
   $: EngineInterface,
@@ -276,47 +328,45 @@ async function compactNow($: EngineInterface, s: Ranko) {
 
 /**
  * The stats beside Ranko, the same on every surface: a row each for the
- * context, the cache and the limits, a dim label and its reading, and the
- * Compact button under them, which stands out once the context is nearly full.
+ * context, the cache and the limits, a dim label, a bar and the reading. The
+ * context's row ends in the Compact button once there is something to
+ * compact, and it stands out once the context is nearly full.
  */
 function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: number, onCompact: () => void) {
   const { Box, Text, Button } = el
   const context = contextOf(s.usage)
-  const limits = s.usage ? limitsText(s.usage.rateLimits, nowMs) : null
-  const isFull = (context?.percent ?? 0) >= COMPACT_AT
-  const color = (percent: number) => (percent >= COMPACT_AT ? 'error' : percent >= 50 ? 'warning' : 'success')
-  const row = (key: string, label: string, value: RenderElement) => (
+  const cache = cacheOf(s.cache, cacheTtl(s.isPlan), nowMs)
+  const limits = limitsOf(limitsNow(s), nowMs)
+  const isCompactable = s.isCompacting || (context?.percent ?? 0) >= COMPACT_FROM
+  // A dim label, a bar in the reading's color (or dim, empty, with none), the
+  // reading, and what else the row holds.
+  const row = (key: string, label: string, percent: number, barColor: string | null, text: string, end?: RenderElement) => (
     <Box key={key} flexDirection="row">
       <Box width={STATS_LABEL_COLUMNS}>
         <Text dimColor>{label}</Text>
       </Box>
-      {value}
+      <Box flexDirection="row" gap={1}>
+        {barColor ? <Text color={barColor}>{bar(percent)}</Text> : <Text dimColor>{bar(0)}</Text>}
+        <Text wrap="truncate">{text}</Text>
+        {end}
+      </Box>
     </Box>
   )
+  const compact = isCompactable ? (
+    <Button
+      key="compact"
+      label={s.isCompacting ? 'Compacting…' : 'Compact'}
+      variant={(context?.percent ?? 0) >= COMPACT_AT ? 'primary' : 'secondary'}
+      onPress={onCompact}
+    />
+  ) : undefined
   return (
     <Box flexDirection="column" width={width} height={rows} overflow="hidden">
-      {row(
-        'context',
-        'Context',
-        context ? (
-          <Box flexDirection="row" gap={1}>
-            <Text color={color(context.percent)}>{bar(context.percent)}</Text>
-            <Text wrap="truncate">{context.text}</Text>
-          </Box>
-        ) : (
-          <Text dimColor>no reading yet</Text>
-        ),
-      )}
-      {row('cache', 'Cache', <Text wrap="truncate">{cacheText(s.cache, cacheTtl(s.usage), nowMs)}</Text>)}
-      {limits ? row('limits', 'Limits', <Text wrap="truncate">{limits}</Text>) : null}
-      <Box flexDirection="row">
-        <Button
-          key="compact"
-          label={s.isCompacting ? 'Compacting…' : 'Compact'}
-          variant={isFull ? 'primary' : 'secondary'}
-          onPress={onCompact}
-        />
-      </Box>
+      {context
+        ? row('context', 'Context', context.percent, fillColor(context.percent), context.text, compact)
+        : row('context', 'Context', 0, null, 'no reading yet', compact)}
+      {row('cache', 'Cache', cache.percent, cache.percent > 0 ? cacheColor(cache.percent) : null, cache.text)}
+      {limits ? row('limits', 'Limits', limits.percent, fillColor(limits.percent), limits.text) : null}
     </Box>
   )
 }
@@ -384,8 +434,14 @@ function start($: EngineInterface, s: Ranko) {
         void readUsage($, s).then(() => host.invalidate())
       }
     })
+    $.clock.every(PLAN_EVERY_MS, () => {
+      if (s.isOn('stats') && s.isShown) {
+        void readPlan($, s).then(() => host.invalidate())
+      }
+    })
     if (s.isOn('stats')) {
       await readUsage($, s)
+      void readPlan($, s).then(() => host.invalidate())
     }
   })()
   return s.starting
@@ -445,6 +501,9 @@ export function register(on: On, options: PluginOptions) {
     sizeSuffix: '',
     grab: null,
     usage: null,
+    plan: null,
+    isPlan: false,
+    lastResponseAt: null,
     cache: null,
     isCompacting: false,
     compactLogs: 0,
@@ -573,17 +632,16 @@ export function register(on: On, options: PluginOptions) {
     return result
   })
 
-  // What each request of the main conversation did with the prompt cache:
-  // its use keeps the cache warm for another stretch.
+  // Every response, a subagent's too, brings fresh limits; one of the main
+  // conversation also keeps the prompt cache warm for another stretch.
   on('turn.step', async function* ($, e, next) {
     const result = yield* next(e)
-    if (!e.agentId && result.usage) {
-      const { input_tokens, cache_read_input_tokens, cache_creation_input_tokens } = result.usage
-      s.cache = {
-        at: await $.clock.now(),
-        input: input_tokens,
-        read: cache_read_input_tokens,
-        written: cache_creation_input_tokens,
+    if (result.usage) {
+      const now = await $.clock.now()
+      s.lastResponseAt = now
+      if (!e.agentId) {
+        const { input_tokens, cache_read_input_tokens, cache_creation_input_tokens } = result.usage
+        s.cache = { at: now, input: input_tokens, read: cache_read_input_tokens, written: cache_creation_input_tokens }
       }
       if (s.isOn('stats')) {
         void readUsage($, s).then(() => $.ui.invalidate('ui.render'))

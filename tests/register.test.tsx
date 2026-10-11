@@ -509,12 +509,28 @@ describe('register', () => {
     await band.unmount()
   })
 
-  test('beside him the stats show the context, the cache and the limits', async ($, on) => {
-    const limits = [
+  test('beside him the stats show the context, the cache and the limits, each with a bar', { timeoutMs: 20000 }, async ($, on) => {
+    // What this session's last response reported, and what the usage
+    // endpoint has, other sessions counted.
+    const own = [
       { kind: 'five_hour', percentUsed: 23, resetsAt: '2030-01-07T17:40:00Z' },
       { kind: 'seven_day', percentUsed: 41, resetsAt: '2030-01-13T09:00:00Z' },
     ]
-    answerTheWorld(on, 42, MANIFEST, limits)
+    const clock = answerTheWorld(on, 42, MANIFEST, own)
+    on('session.authorize', () => ({ value: { handle: 'login', kind: 'bearer' as const } }))
+    on('http.fetch', ($, e) => ({
+      value: {
+        status: 200,
+        ok: true,
+        headers: {},
+        text: e.url.endsWith('/api/oauth/usage')
+          ? JSON.stringify({
+              five_hour: { utilization: 68, resets_at: '2030-01-07T17:40:00Z' },
+              seven_day: { utilization: 62, resets_at: '2030-01-13T09:00:00Z' },
+            })
+          : '',
+      },
+    }))
     on('turn.step', async function* ($, e) {
       return {
         turnId: e.turnId,
@@ -532,24 +548,48 @@ describe('register', () => {
       }
     })
     await $.session.start(START)
+    const limitsRow = /^(5h \d+%) ↻ .+ · (7d \d+%) ↻ .+$/
+    const shownLimits = async (band: { find: (q: { type: string; text: RegExp }) => Promise<{ text: string } | undefined> }) =>
+      (await band.find({ type: 'Text', text: limitsRow }))?.text.match(limitsRow)?.slice(1, 3).join(' ')
 
     for (const surface of ['terminal', 'desktop'] as const) {
       const band = await $.ui.mount({ ...BAND, surface })
+      await band.redraw()
       expect(await band.find({ type: 'Text', text: '42% · 84k / 200k' })).toBeDefined()
-      expect(await band.find({ type: 'Text', text: /^5h 23% \(.+\) · 7d 41% \(.+\)$/ })).toBeDefined()
+      expect(await band.find({ type: 'Text', text: '████░░░░░░' })).toBeDefined()
+      expect(await shownLimits(band)).toBe('5h 68% 7d 62%')
+      expect(await band.find({ type: 'Text', text: '███████░░░' })).toBeDefined()
       expect((await band.find({ key: 'compact' }))?.props.variant).toBe('secondary')
       await band.unmount()
     }
 
     const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
     expect(await band.find({ type: 'Text', text: 'no request yet' })).toBeDefined()
-    // A Claude plan keeps the cache an hour after its last use.
+    // A response: the cache is warm for the hour a Claude plan keeps it, and
+    // the limits it reported are the freshest until the endpoint is asked again.
     for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude', messageCount: 1 })) {
       // Nothing streams: the step's result is what counts.
     }
     await band.redraw()
-    expect(await band.find({ type: 'Text', text: 'warm · 60m left · 90% read' })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: '60m left · 90% read' })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: '██████████' })).toBeDefined()
+    expect(await shownLimits(band)).toBe('5h 23% 7d 41%')
+    await clock.advance(60_000)
+    await band.redraw()
+    expect(await shownLimits(band)).toBe('5h 68% 7d 62%')
+    expect(await band.find({ type: 'Text', text: '59m left · 90% read' })).toBeDefined()
     await band.unmount()
+  })
+
+  test('under 15% of context there is nothing to compact: no Compact button', async ($, on) => {
+    answerTheWorld(on, 10)
+    await $.session.start(START)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      expect(await band.find({ type: 'Text', text: '10% · 20k / 200k' })).toBeDefined()
+      expect(await band.find({ key: 'compact' })).toBeUndefined()
+      await band.unmount()
+    }
   })
 
   test('stats off: the band holds Ranko alone', { options: { stats: false } }, async ($, on) => {

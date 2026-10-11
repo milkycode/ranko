@@ -16,11 +16,14 @@ lets it out with a sigh on compaction, and he sits down and gets up between
 all of these rather than jumping.
 
 Beside him the band shows how full the context is, how long the prompt cache
-stays warm, and your plan's 5-hour and weekly limits, with a Compact button
-that stands out once the context is 80% full. After a compaction, by the
-button or `/compact`, the conversation shows the summary Claude carries on
-with, under a line with the tokens before and after; Claude doesn't read
-those lines.
+stays warm, and your plan's 5-hour and weekly limits with their reset times,
+each with a bar. Beside the context sits a Compact button from 15% on, which
+stands out once the context is 80% full. The figures are read again every 10
+seconds and after every response; the limits come from where `/usage` reads
+them, once a minute, so what your other sessions use shows up too. After a
+compaction, by the button or `/compact`, the conversation shows the summary
+Claude carries on with, under a line with the tokens before and after; Claude
+doesn't read those lines.
 
 It is a Claude Code mod: frames baked in Blender, played above the prompt.
 In a terminal they play by swapping an `Image`'s source with `$.ui.blit`,
@@ -64,9 +67,9 @@ claude --plugin-dir path/to/ranko
   `pats`, `toolProps`, `miniRankos`, `stuffing`, `blush`, `fidgets`, `sounds`,
   `stats`, `compactSummary`.
 
-Sounds play on macOS only. The cache's countdown assumes an hour on a Claude
-plan and five minutes on an API key: Claude Code doesn't say which one it
-asked for.
+Sounds play on macOS only. The cache's countdown assumes an hour when you are
+logged in with a Claude plan and five minutes with an API key: Claude Code
+doesn't say which one it asked for.
 
 ## How he is made
 

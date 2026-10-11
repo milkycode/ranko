@@ -113,6 +113,9 @@ pictures in `previews/`, which stay out of the repo (`blender/review.py`,
    demo GIF, and a link to [rankello.ai](https://rankello.ai). *Done.*
 8. **Desktop app.** Every clip, the minis and the switches drawn as SVG in
    the desktop band; dragging, with a frame where he will land, and pats.
-9. **Stats.** Context, prompt cache and plan limits beside him, a Compact
-   button, and the compaction summary logged where the model doesn't read
-   it, cut between paragraphs into lines the terminal draws whole.
+9. **Stats.** Context, prompt cache and plan limits beside him, each with a
+   bar, a Compact button, and the compaction summary logged where the model
+   doesn't read it, cut between paragraphs into lines the terminal draws
+   whole. The limits come from the usage endpoint `/usage` reads
+   (`api.anthropic.com/api/oauth/usage`, with the session's login through
+   `$.session.authorize`), once a minute, so other sessions count too.

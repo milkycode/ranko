@@ -1,10 +1,10 @@
 import type { SessionMessage, SessionRateLimit, SessionUsage } from 'claude-code'
 
 /**
- * The figures the band shows beside Ranko: how full the context is, whether
- * the prompt cache is still warm and for how long, and the plan's usage
- * limits; and a compaction's summary cut into lines the transcript draws
- * whole.
+ * The figures the band shows beside Ranko, each with a bar: how full the
+ * context is, how long the prompt cache stays warm, and how much of the
+ * plan's five-hour window is used, with the limits' reset times; and a
+ * compaction's summary cut into lines the transcript draws whole.
  *
  * No engine here: register.tsx reads the session and draws what this says.
  */
@@ -15,8 +15,18 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 // The terminal draws the first 2000 characters of a log line; a remote
 // surface draws more, so this fits both.
 export const LOG_LIMIT = 2000
-// From here on the Compact button stands out.
+// The Compact button shows from this much context on, and stands out from
+// the second.
+export const COMPACT_FROM = 15
 export const COMPACT_AT = 80
+// What stands before a limit's reset time.
+const RESET_MARK = '↻'
+
+/** A used-up share's color: green, yellow from half, red once nearly full. */
+export const fillColor = (percent: number) => (percent >= COMPACT_AT ? 'error' : percent >= 50 ? 'warning' : 'success')
+
+/** The cache's color by the share of its time left: green, yellow under half, red under a quarter. */
+export const cacheColor = (percentLeft: number) => (percentLeft >= 50 ? 'success' : percentLeft >= 25 ? 'warning' : 'error')
 
 /** What the last request of the main conversation did with the prompt cache. */
 export type CacheReading = {
@@ -29,11 +39,10 @@ export type CacheReading = {
 
 /**
  * How long the prompt cache lives after its last use: an hour on a Claude
- * plan, five minutes on an API key. The engine doesn't say which, so the
- * plan's rate-limit windows, which an API key has none of, tell.
+ * plan, five minutes on an API key. The engine doesn't say which; the
+ * session's credential does.
  */
-export const cacheTtl = (usage: SessionUsage | null) =>
-  usage?.rateLimits.some(l => l.kind === 'five_hour' || l.kind === 'seven_day') ? HOUR : 5 * MINUTE
+export const cacheTtl = (isPlan: boolean) => (isPlan ? HOUR : 5 * MINUTE)
 
 /** 84000 as 84k, 1200000 as 1.2M. */
 export function tokens(n: number) {
@@ -67,18 +76,22 @@ export function contextOf(usage: SessionUsage | null) {
   return { percent, text: `${percent}% · ${used === undefined ? '?' : tokens(used)} / ${tokens(window)}` }
 }
 
-/** Whether the cache is warm and for how much longer, or how long ago it lapsed. */
-export function cacheText(reading: CacheReading | null, ttlMs: number, nowMs: number) {
+/**
+ * The cache: the share of its time left, for the bar, and how much longer it
+ * stays warm with how much of the last request it served, or how long ago it
+ * lapsed.
+ */
+export function cacheOf(reading: CacheReading | null, ttlMs: number, nowMs: number) {
   if (!reading) {
-    return 'no request yet'
+    return { percent: 0, text: 'no request yet' }
   }
   const left = reading.at + ttlMs - nowMs
   if (left <= 0) {
-    return `expired ${span(-left)} ago`
+    return { percent: 0, text: `expired ${span(-left)} ago` }
   }
   const total = reading.input + reading.read + reading.written
   const hit = total > 0 ? ` · ${Math.round((reading.read / total) * 100)}% read` : ''
-  return `warm · ${span(left)} left${hit}`
+  return { percent: Math.min(100, (left / ttlMs) * 100), text: `${span(left)} left${hit}` }
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -93,14 +106,53 @@ function resetAt(iso: string, nowMs: number) {
   return at.getTime() - nowMs >= 24 * HOUR ? `${WEEKDAYS[at.getDay()]} ${time}` : time
 }
 
-/** The plan's usage limits, `5h 23% (17:40) · 7d 41% (Mon 09:00)`; null with none. */
-export function limitsText(limits: readonly SessionRateLimit[], nowMs: number) {
+/**
+ * The plan's usage limits, `5h 23% ↻ 17:40 · 7d 41% ↻ Mon 09:00`, and the
+ * session window's share for the bar (the five hours, or the first limit
+ * there is); null with none.
+ */
+export function limitsOf(limits: readonly SessionRateLimit[], nowMs: number) {
   const names: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
-  const parts = limits.map(limit => {
-    const reset = limit.resetsAt ? resetAt(limit.resetsAt, nowMs) : null
-    return `${names[limit.kind] ?? limit.kind} ${Math.round(limit.percentUsed)}%${reset ? ` (${reset})` : ''}`
-  })
-  return parts.length > 0 ? parts.join(' · ') : null
+  const session = limits.find(limit => limit.kind === 'five_hour') ?? limits[0]
+  if (!session) {
+    return null
+  }
+  const text = limits
+    .map(limit => {
+      const reset = limit.resetsAt ? resetAt(limit.resetsAt, nowMs) : null
+      return `${names[limit.kind] ?? limit.kind} ${Math.round(limit.percentUsed)}%${reset ? ` ${RESET_MARK} ${reset}` : ''}`
+    })
+    .join(' · ')
+  return { percent: session.percentUsed, text }
+}
+
+/**
+ * The plan's limits as Anthropic's usage endpoint (what /usage reads) has
+ * them now, every session of the account counted; null for a body without
+ * them.
+ */
+export function planLimits(body: string): SessionRateLimit[] | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return null
+  }
+  const limits: SessionRateLimit[] = []
+  for (const kind of ['five_hour', 'seven_day']) {
+    const window = (parsed as Record<string, unknown>)[kind] as { utilization?: unknown; resets_at?: unknown } | null
+    if (typeof window?.utilization === 'number') {
+      limits.push({
+        kind,
+        percentUsed: window.utilization,
+        ...(typeof window.resets_at === 'string' ? { resetsAt: window.resets_at } : {}),
+      })
+    }
+  }
+  return limits.length > 0 ? limits : null
 }
 
 /**
