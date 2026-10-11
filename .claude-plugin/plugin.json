@@ -33,7 +33,7 @@
     "toolProps": {
       "type": "boolean",
       "title": "Tool props",
-      "description": "Ranko holds a prop for the tool Claude is using: a magnifier to read or search, a notepad and pencil to edit, binoculars for the web; otherwise he types on his laptop.",
+      "description": "Ranko holds a prop for the tool Claude is using: a magnifier to read or search, a notepad and pencil to edit or keep the task list, binoculars for the web and the browser; otherwise he types on his laptop.",
       "required": false,
       "default": true
     },
@@ -54,7 +54,21 @@
     "blush": {
       "type": "boolean",
       "title": "Blush at kind words",
-      "description": "Thanks or praise in a prompt makes Ranko blush.",
+      "description": "Thanks or praise in a prompt, in English or German, makes Ranko blush.",
+      "required": false,
+      "default": true
+    },
+    "attention": {
+      "type": "boolean",
+      "title": "Wave when Claude waits",
+      "description": "When Claude waits for your permission or for your answer to a question, Ranko stops typing, stands up and waves, then says psst every half minute until you answer; after five minutes he dozes off.",
+      "required": false,
+      "default": true
+    },
+    "thumbsUp": {
+      "type": "boolean",
+      "title": "Thumbs up for work done",
+      "description": "A commit, a push, a pull request opened or merged, or a test run that passes gets a thumbs up from Ranko.",
       "required": false,
       "default": true
     },

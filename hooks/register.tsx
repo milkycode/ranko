@@ -15,7 +15,7 @@ import type {
 
 import type { GrabMessage, GrabProps } from './grab'
 import type { PressMessage, PressProps } from './press'
-import { FEATURES, LEAVE_FRAMES, PROP_FOR_TOOL, Pet, isManifest, moodOf, sizeFor } from './pet'
+import { FEATURES, LEAVE_FRAMES, Pet, commandSuggestions, isManifest, moodOf, propFor, sizeFor } from './pet'
 import type { Feature, Manifest, Mini } from './pet'
 import {
   COMPACT_FROM,
@@ -31,12 +31,14 @@ import {
   logChunks,
   nextTasks,
   planLimits,
+  planReadingOf,
+  retryAfterMs,
   sessionOf,
   summaryOf,
   tasksOf,
   tokens,
 } from './stats'
-import type { CacheReading, LimitSample, SessionFacts, Task } from './stats'
+import type { CacheReading, LimitSample, PlanReading, SessionFacts, Task } from './stats'
 
 /**
  * Ranko above the prompt: frames baked by blender/bake.py, played
@@ -104,7 +106,7 @@ type Ranko = {
   usage: SessionUsage | null
   // The plan's limits as the usage endpoint last had them, every session of
   // the account counted, and when; null without a Claude plan login.
-  plan: { limits: SessionRateLimit[]; at: number } | null
+  plan: PlanReading | null
   isPlan: boolean
   // When the last response of this session came, a subagent's too: the
   // limits it reported are as fresh. Null before the first.
@@ -127,6 +129,9 @@ type Ranko = {
   autoCompactReadAt: number | null
   // Claude's task list in the main conversation.
   tasks: Task[]
+  // When each turn under way started, the main conversation's and the
+  // subagents' alike: a start doesn't say whose it is.
+  turnStarts: Map<string, number>
   // For the session row: the main conversation's turns, the one under way
   // and the last, the agents running, and the background work and wakeups
   // the last turn left.
@@ -138,6 +143,13 @@ type Ranko = {
   wakeups: { schedule: string; recurring: boolean }[]
   // The band folded to one line of the figures, Ranko not drawn; kept.
   isCollapsed: boolean
+  // The tool calls under way, a subagent's too, and those of them that wait
+  // on the person: a permission dialog, a question. WAITING stands for a
+  // dialog whose call wasn't found.
+  calls: Map<string, { tool: string; agentId: string | undefined }>
+  waits: Set<string>
+  // When the pet was last drawn: asleep a good while, he is drawn less often.
+  drawnAt: number
 }
 
 // The elements the stats draw with, and whether the surface is the desktop,
@@ -148,8 +160,9 @@ const KEY = 'ranko'
 // A turn shorter than this ends without a celebration: quick answers would
 // otherwise make it jump after every message.
 const HAPPY_AFTER_MS = 4000
+// In English and German, between letters of neither: \b doesn't know ö.
 const KIND_WORDS =
-  /\b(thanks|thank you|thx|good job|great job|nice work|well done|love it|love you|awesome|you rock)\b/i
+  /(?<!\p{L})(thanks|thank you|thx|good job|great job|nice work|well done|love it|love you|awesome|you rock|danke|dankeschön|vielen dank|besten dank|merci|gut gemacht|super gemacht|gute arbeit|super arbeit|perfekt|toll|prima|genial|wunderbar|großartig|hervorragend)(?!\p{L})/iu
 
 // The moods with a sound, by the name of their file in assets/sounds; the
 // rest (idle, working, the fidgets) stay quiet, or Ranko would never stop.
@@ -187,12 +200,34 @@ const PLAN_EVERY_MS = 60_000
 const PLAN_RETRY_MS = 10_000
 const PLAN_RETRIES = 6
 const PLAN_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+// The endpoint's last reading and, after a 429, when it may be asked again,
+// in the store, which every session of this configuration shares, and so its
+// login: a reading under a minute old stands in for asking. Told to wait
+// without a time, it is left alone this long.
+const PLAN_KEY = 'plan'
+const PLAN_WAIT_KEY = 'planWait'
+const PLAN_BACKOFF_MS = 5 * 60_000
 // The five-hour window's readings are kept this long, for its recent pace.
 const SAMPLES_KEPT_MS = 60 * 60_000
 // The tools that keep Claude's task list.
 const TASK_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'])
 // The agents that count as running.
 const ACTIVE_AGENTS = new Set(['pending', 'running', 'waiting'])
+// The tools that wait for the person's answer while they run.
+const ASKING_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+// What stands in the waits for a permission dialog whose call wasn't found.
+const WAITING = 'permission'
+// Asleep a good while, Ranko is drawn this often rather than every frame:
+// on the desktop every frame is a redraw carrying its picture whole. Asleep
+// longer still, he holds still, drawn not at all until something wakes him.
+// No surface says whether its window is in view; this is the stand-in.
+const DROWSY_DRAW_MS = 250
+// A test run, by its command: what earns a thumbs up when it passes.
+// Its output can still say it failed: piped through tail, a failed run ends
+// well.
+const TEST_RUN =
+  /(?<![\w-])((npm|pnpm|yarn|bun)( run)? test|jest|vitest|pytest|phpunit|go test|cargo test|claude plugin test|make test)(?![\w-])/
+const FAILED = /\b[1-9]\d* (failed|failing|failures?)\b|\bfailures?: [1-9]|\bFAIL(ED|URES)?\b/i
 
 const clamp = (value: number, low: number, high: number) =>
   Math.max(low, Math.min(high, Math.round(value)))
@@ -300,6 +335,19 @@ async function readUsage($: EngineInterface, s: Ranko) {
   }
 }
 
+/** Fits Ranko's size to the context's fill, rounder as it fills: at the start too, so a resumed session shows him as full as it is. */
+async function fitSize($: EngineInterface, s: Ranko) {
+  if (!s.pet || !s.isOn('stuffing')) {
+    return
+  }
+  try {
+    const { context } = await $.session.usage()
+    s.pet.size = sizeFor(context.percent ?? 0)
+  } catch {
+    // No reading this time; the size stays as it was.
+  }
+}
+
 /** How many turns the conversation held before this load: the prompts in it. */
 async function countTurns($: EngineInterface, s: Ranko) {
   const messages = await $.session.messages().catch(() => [])
@@ -311,7 +359,8 @@ async function countTurns($: EngineInterface, s: Ranko) {
  * with the session's own login; an API key or another provider has none.
  */
 async function readPlan($: EngineInterface, s: Ranko) {
-  s.planAskedAt = await $.clock.now()
+  const now = await $.clock.now()
+  s.planAskedAt = now
   s.planMisses += 1
   try {
     const auth = await $.session.authorize()
@@ -319,24 +368,48 @@ async function readPlan($: EngineInterface, s: Ranko) {
     if (!auth || !s.isPlan) {
       return
     }
+    const shared = planReadingOf(await $.store.get(PLAN_KEY).catch(() => undefined))
+    if (shared && now - shared.at < PLAN_EVERY_MS) {
+      takePlan(s, shared)
+      return
+    }
+    const waitUntil = await $.store.get(PLAN_WAIT_KEY).catch(() => undefined)
+    if (typeof waitUntil === 'number' && now < waitUntil) {
+      return
+    }
     const response = await $.http.fetch(PLAN_USAGE_URL, {
       headers: { 'anthropic-beta': 'oauth-2025-04-20' },
       auth: auth.handle,
     })
+    if (response.status === 429) {
+      const wait = retryAfterMs(response.headers['retry-after'], now) ?? PLAN_BACKOFF_MS
+      await $.store.set(PLAN_WAIT_KEY, now + wait).catch(() => undefined)
+      return
+    }
     const limits = response.ok ? planLimits(response.text) : null
     if (limits) {
-      const at = await $.clock.now()
-      s.plan = { limits, at }
-      s.planMisses = 0
-      const fiveHour = limits.find(limit => limit.kind === 'five_hour')
-      if (fiveHour) {
-        const isSameWindow = isSameReset(s.fiveHour.resetsAt, fiveHour.resetsAt)
-        const kept = isSameWindow ? s.fiveHour.samples.filter(sample => at - sample.at <= SAMPLES_KEPT_MS) : []
-        s.fiveHour = { resetsAt: fiveHour.resetsAt, samples: [...kept, { at, percent: fiveHour.percentUsed }] }
-      }
+      const reading: PlanReading = { limits, at: await $.clock.now() }
+      takePlan(s, reading)
+      await $.store.set(PLAN_KEY, reading).catch(() => undefined)
     }
   } catch {
     // Offline, or the traffic is off: the session's own reading stands.
+  }
+}
+
+/** Takes a reading of the plan's limits, this session's or another's, and the five hours' pace from it. */
+function takePlan(s: Ranko, reading: PlanReading) {
+  s.planMisses = 0
+  if (s.plan?.at === reading.at) {
+    return
+  }
+  const { limits, at } = reading
+  s.plan = reading
+  const fiveHour = limits.find(limit => limit.kind === 'five_hour')
+  if (fiveHour) {
+    const isSameWindow = isSameReset(s.fiveHour.resetsAt, fiveHour.resetsAt)
+    const kept = isSameWindow ? s.fiveHour.samples.filter(sample => at - sample.at <= SAMPLES_KEPT_MS) : []
+    s.fiveHour = { resetsAt: fiveHour.resetsAt, samples: [...kept, { at, percent: fiveHour.percentUsed }] }
   }
 }
 
@@ -617,6 +690,8 @@ function start($: EngineInterface, s: Ranko) {
     })
     s.pet.lastActivityMs = await host.now()
 
+    await fitSize($, s)
+
     const saved = await $.store.get('left').catch(() => undefined)
     s.left = typeof saved === 'number' ? saved : null
     s.isCollapsed = (await $.store.get('collapsed').catch(() => undefined)) === true
@@ -651,9 +726,18 @@ async function tick(s: Ranko) {
   if (!host || !pet || !s.isShown || !(isOnTerminal || s.isOnDesktop)) {
     return
   }
-  pet.sync(await host.now())
+  const now = await host.now()
+  pet.sync(now)
+  const depth = pet.sleepDepth(now)
+  if (depth === 'still') {
+    return
+  }
+  const isDrawn = depth === 'awake' || now - s.drawnAt >= DROWSY_DRAW_MS
+  if (isDrawn) {
+    s.drawnAt = now
+  }
 
-  if (isOnTerminal) {
+  if (isOnTerminal && isDrawn) {
     const blits = [host.blit(requestId, KEY + s.sizeSuffix, fileOf(s, pet.clip, pet.fileFrame()))]
     const working = pet.framesOf('working')
     for (const mini of pet.minis) {
@@ -669,7 +753,7 @@ async function tick(s: Ranko) {
   }
   // The desktop has no blit: each new frame is a redraw, and redraws asked
   // for faster than it takes them fold into one.
-  if (pet.advance() || s.isOnDesktop) {
+  if (pet.advance() || (s.isOnDesktop && isDrawn)) {
     host.invalidate()
   }
 }
@@ -678,6 +762,35 @@ async function noteActivity($: EngineInterface, s: Ranko) {
   if (s.pet) {
     s.pet.lastActivityMs = await $.clock.now()
   }
+}
+
+/** Marks a call as waiting on the person, or done waiting, and tells Ranko whether any still waits. */
+async function setWait($: EngineInterface, s: Ranko, id: string, isWaiting: boolean) {
+  if (isWaiting) {
+    s.waits.add(id)
+  } else {
+    s.waits.delete(id)
+  }
+  s.pet?.setWaiting(s.waits.size > 0, await $.clock.now())
+}
+
+/** Whether a shell call did something worth a thumbs up: a commit, a push, a pull request opened or merged, a test run that passed. */
+function isWellDone(command: string, record: unknown) {
+  const run = (record ?? {}) as {
+    stdout?: string
+    stderr?: string
+    interrupted?: boolean
+    backgroundTaskId?: string
+    gitOperation?: { commit?: unknown; push?: unknown; pr?: { action: string } }
+  }
+  if (run.interrupted || run.backgroundTaskId !== undefined) {
+    return false
+  }
+  const git = run.gitOperation
+  if (git?.commit || git?.push || git?.pr?.action === 'created' || git?.pr?.action === 'merged') {
+    return true
+  }
+  return TEST_RUN.test(command) && !FAILED.test(`${run.stdout ?? ''}\n${run.stderr ?? ''}`)
 }
 
 export function register(on: On, options: PluginOptions) {
@@ -711,6 +824,7 @@ export function register(on: On, options: PluginOptions) {
     planMisses: 0,
     autoCompactReadAt: null,
     tasks: [],
+    turnStarts: new Map(),
     turns: 0,
     turn: null,
     lastTurn: null,
@@ -718,6 +832,9 @@ export function register(on: On, options: PluginOptions) {
     background: [],
     wakeups: [],
     isCollapsed: false,
+    calls: new Map(),
+    waits: new Set(),
+    drawnAt: 0,
   }
 
   on('session.start', async ($, e, next) => {
@@ -773,22 +890,36 @@ export function register(on: On, options: PluginOptions) {
     return { text: `Ranko plays ${verb}` }
   })
 
+  // The typeahead for /ranko: its verbs and reactions, and after on or off
+  // the switches.
+  on('prompt.autocomplete', async ($, e, next) => {
+    const result = await next(e)
+    const mine = commandSuggestions(e.text, e.start, e.token, s.pet?.clipNames() ?? [], s.isOn)
+    return mine.length > 0 ? { suggestions: [...result.suggestions, ...mine] } : result
+  })
+
   on('turn.start', async ($, e, next) => {
     // The start doesn't say whose turn it is; any turn means work is under way.
     s.pet?.runningTurns.add(e.turnId)
+    const now = await $.clock.now()
+    s.turnStarts.set(e.turnId, now)
     // The first to start while none is under way is taken for the main
-    // conversation's; a subagent's completion says otherwise.
-    s.turn ??= { id: e.turnId, startedAt: await $.clock.now(), tools: 0 }
+    // conversation's until its first request says whose it is (turn.step).
+    s.turn ??= { id: e.turnId, startedAt: now, tools: 0 }
     await noteActivity($, s)
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    s.turnStarts.delete(e.turnId)
     if (!e.agentId) {
       s.turns += 1
-      s.lastTurn = { durationMs: e.durationMs, tools: s.turn?.tools ?? 0 }
+      s.lastTurn = { durationMs: e.durationMs, tools: s.turn?.id === e.turnId ? s.turn.tools : 0 }
       s.turn = null
+      // The turn is over: nothing waits on the person any more.
+      s.waits.clear()
+      await setWait($, s, WAITING, false)
     } else if (s.turn?.id === e.turnId) {
       s.turn = null
     }
@@ -808,32 +939,31 @@ export function register(on: On, options: PluginOptions) {
     } else if (e.durationMs >= HAPPY_AFTER_MS) {
       pet.play('happy')
     }
-    if (s.isOn('stuffing')) {
-      try {
-        const { context } = await $.session.usage()
-        pet.size = sizeFor(context.percent ?? 0)
-      } catch {
-        // No reading this time; the size stays as it was.
-      }
-    }
+    await fitSize($, s)
     return result
   })
 
   on('tool.call', async ($, e, next) => {
     const { pet } = s
-    // A subagent's tool calls are its own business: no prop, no wobble, no
-    // task of the list.
-    if (e.agentId) {
-      return next(e)
-    }
-    if (s.turn) {
-      s.turn.tools += 1
-    }
-    const prop = PROP_FOR_TOOL[e.tool]
-    if (pet && prop) {
-      pet.toolStarted(e.tool_use_id, prop, await $.clock.now())
-    }
+    // Every call, a subagent's too, may wait on the person's permission
+    // (classic.PermissionRequest); a question waits on the answer.
+    s.calls.set(e.tool_use_id, { tool: e.tool, agentId: e.agentId })
     try {
+      // Otherwise a subagent's tool calls are its own business: no prop, no
+      // wobble, no task of the list.
+      if (e.agentId) {
+        return await next(e)
+      }
+      if (s.turn) {
+        s.turn.tools += 1
+      }
+      const prop = propFor(e.tool)
+      if (pet && prop) {
+        pet.toolStarted(e.tool_use_id, prop, await $.clock.now())
+      }
+      if (ASKING_TOOLS.has(e.tool)) {
+        await setWait($, s, e.tool_use_id, true)
+      }
       const result = await next(e)
       if (result.deny !== undefined || result.isError) {
         pet?.play('oops')
@@ -843,15 +973,47 @@ export function register(on: On, options: PluginOptions) {
         if (s.isOn('stats')) {
           $.ui.invalidate('ui.render')
         }
+      } else if (e.tool === 'Bash' && s.isOn('thumbsUp') && isWellDone(e.command, result.result)) {
+        pet?.thumbsUp()
       }
       return result
     } finally {
+      s.calls.delete(e.tool_use_id)
       pet?.toolEnded(e.tool_use_id)
+      // A call that ends was answered; so, by now, was a dialog whose call
+      // wasn't found.
+      if (s.waits.has(e.tool_use_id) || s.waits.has(WAITING)) {
+        s.waits.delete(WAITING)
+        await setWait($, s, e.tool_use_id, false)
+      }
     }
+  })
+
+  // A permission dialog: the person is wanted until the call it asks for
+  // ends. A decision from a hook beneath shows no dialog.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const result = await next(e)
+    if (result.decision === undefined) {
+      const call = [...s.calls].find(([id, c]) => c.tool === e.tool_name && c.agentId === e.agent_id && !s.waits.has(id))
+      await setWait($, s, call?.[0] ?? WAITING, true)
+    }
+    return result
+  })
+
+  // Typing in the prompt box is the person at hand: it keeps Ranko awake,
+  // and wakes him from his nap, without holding up a key.
+  on('prompt.edit', ($, e, next) => {
+    void noteActivity($, s)
+    return next(e)
   })
 
   on('prompt.submit', async ($, e, next) => {
     await noteActivity($, s)
+    // A prompt is the person back: whatever waited on them has its answer.
+    if (s.waits.size > 0) {
+      s.waits.clear()
+      await setWait($, s, WAITING, false)
+    }
     if (s.pet && s.isOn('blush') && KIND_WORDS.test(e.text)) {
       s.pet.play('blush')
     }
@@ -871,6 +1033,13 @@ export function register(on: On, options: PluginOptions) {
   // Every response, a subagent's too, brings fresh limits; one of the main
   // conversation also keeps the prompt cache warm for another stretch.
   on('turn.step', async function* ($, e, next) {
+    // A request says whose turn it is, which the start couldn't: the main
+    // conversation's has no agent.
+    if (!e.agentId && s.turn?.id !== e.turnId) {
+      s.turn = { id: e.turnId, startedAt: s.turnStarts.get(e.turnId) ?? (await $.clock.now()), tools: 0 }
+    } else if (e.agentId && s.turn?.id === e.turnId) {
+      s.turn = null
+    }
     const result = yield* next(e)
     if (result.usage) {
       const now = await $.clock.now()

@@ -14,12 +14,56 @@ export const FEATURES = [
   'miniRankos',
   'stuffing',
   'blush',
+  'attention',
+  'thumbsUp',
   'fidgets',
   'sounds',
   'stats',
   'compactSummary',
 ] as const
 export type Feature = (typeof FEATURES)[number]
+
+// The verbs /ranko takes besides a reaction, with what they do, for the
+// typeahead; it shows this many rows at most.
+const VERBS: Record<string, string> = {
+  list: 'every reaction and switch',
+  collapse: 'fold the band to one line',
+  expand: 'open the band again',
+  on: 'turn a switch on',
+  off: 'turn a switch off',
+}
+const MAX_SUGGESTIONS = 12
+
+/**
+ * The typeahead's rows for the word being typed after /ranko: its verbs and
+ * the reactions `clips` names, or after on or off the switches, each with
+ * whether it is on. `start` is where the word `token` begins in `text`.
+ */
+export function commandSuggestions(
+  text: string,
+  start: number,
+  token: string,
+  clips: readonly string[],
+  isOn: (feature: Feature) => boolean,
+) {
+  const command = /^\/ranko\s+/.exec(text)
+  if (!command || start < command[0].length) {
+    return []
+  }
+  const args = text.slice(command[0].length, start).split(/\s+/).filter(arg => arg !== '')
+  const [verb] = args
+  const rows: [string, string][] =
+    args.length === 0
+      ? [...Object.entries(VERBS), ...clips.map((clip): [string, string] => [clip, 'play this reaction'])]
+      : args.length === 1 && (verb === 'on' || verb === 'off')
+        ? FEATURES.map((feature): [string, string] => [feature, isOn(feature) ? 'on now' : 'off now'])
+        : []
+  const typed = token.toLowerCase()
+  return rows
+    .filter(([name]) => name.toLowerCase().startsWith(typed) && name !== token)
+    .slice(0, MAX_SUGGESTIONS)
+    .map(([name, description]) => ({ text: name, description }))
+}
 
 export type ClipInfo = {
   frames: number
@@ -61,21 +105,42 @@ export type Prop = 'magnifier' | 'notepad' | 'binoculars'
 export type Size = 'normal' | 'plump' | 'stuffed'
 
 // The shell, and anything else, is his laptop: plain working.
-export const PROP_FOR_TOOL: Record<string, Prop> = {
+const PROP_FOR_TOOL: Record<string, Prop> = {
   Read: 'magnifier',
   Grep: 'magnifier',
   Glob: 'magnifier',
+  LSP: 'magnifier',
+  ToolSearch: 'magnifier',
   Edit: 'notepad',
   Write: 'notepad',
   NotebookEdit: 'notepad',
+  TodoWrite: 'notepad',
+  TaskCreate: 'notepad',
+  TaskUpdate: 'notepad',
   WebFetch: 'binoculars',
   WebSearch: 'binoculars',
 }
+// An MCP server's tools that browse or fetch the web, by a word in their
+// name: Chrome, the built-in browser, Playwright and the like.
+const BROWSING = /^mcp__.*(browser|chrome|playwright|puppeteer|firecrawl|fetch)/i
+
+/** The prop Ranko holds while a tool runs, if it has one. */
+export const propFor = (tool: string): Prop | undefined =>
+  PROP_FOR_TOOL[tool] ?? (BROWSING.test(tool) ? 'binoculars' : undefined)
 
 export const sizeFor = (percent: number): Size =>
   percent >= 80 ? 'stuffed' : percent >= 50 ? 'plump' : 'normal'
 
 const SLEEP_AFTER_MS = 2 * 60 * 1000
+// Asleep this long, there is nothing to see but slow z's; this long, nobody
+// is likely to be looking at all (sleepDepth).
+const DROWSY_AFTER_MS = 60_000
+const STILL_AFTER_MS = 10 * 60_000
+// While Claude waits for the person, he waves at once, then says psst this
+// often; left waiting this long, he gives up and dozes off.
+const BECKON_EVERY_MS = 30_000
+const WAIT_AWAKE_MS = 5 * 60 * 1000
+const THUMBS = 'fidget-thumbs'
 // Every call shows its prop at least this long: reads and edits finish in
 // milliseconds and would otherwise never show one, and a burst of them shows
 // one steady prop instead of a flicker.
@@ -104,7 +169,9 @@ const BY_HAND = 10
 /** The mood a clip belongs to: `idle-stuffed` is idle, stuffed. */
 export const moodOf = (clip: string) => clip.split('-')[0] ?? clip
 
-type OneOff = { clip: string; serial: number; length: number; priority: number }
+// A fidget is cut short by anything under way, a beckon by the end of the
+// wait it called for.
+type OneOff = { clip: string; serial: number; length: number; priority: number; kind?: 'fidget' | 'beckon' }
 
 export type Mini = { id: string; frame: number; leaving: number | null }
 
@@ -124,6 +191,11 @@ export class Pet {
   private serial = 0
   private playing = ''
   private nextFidgetMs: number | null = null
+  // Since when Claude has waited for the person, how often he has beckoned,
+  // and when he beckons next.
+  private waitingSince: number | null = null
+  private beckons = 0
+  private nextBeckonMs: number | null = null
   // How he is now, and the transition under way to how the next clip has
   // him: the clips are baked standing, sitting or on his cushion, and going
   // straight from one to another would be a jump.
@@ -179,18 +251,73 @@ export class Pet {
    * be seen.
    */
   play(clip: string, isByHand = false) {
-    if (!this.has(clip)) {
-      return false
-    }
     const priority = isByHand ? BY_HAND : (PRIORITY[moodOf(clip)] ?? 1)
-    if (this.oneOff && this.oneOff.priority > priority) {
-      return false
-    }
     const frames = this.framesOf(clip)
     const length = isByHand && this.manifest.clips[clip]?.loop ? Math.max(frames, 3 * this.manifest.fps) : frames
+    return this.begin({ clip, length, priority })
+  }
+
+  /**
+   * A thumbs up for work that went well, as strong as a jump: a turn's work
+   * doesn't cut it short, as it does an idle fidget.
+   */
+  thumbsUp() {
+    return this.begin({ clip: THUMBS, length: this.framesOf(THUMBS), priority: PRIORITY.happy ?? 2 })
+  }
+
+  private begin(oneOff: Omit<OneOff, 'serial'>) {
+    if (!this.has(oneOff.clip) || (this.oneOff && this.oneOff.priority > oneOff.priority)) {
+      return false
+    }
     this.serial += 1
-    this.oneOff = { clip, serial: this.serial, length, priority }
+    this.oneOff = { ...oneOff, serial: this.serial }
     return true
+  }
+
+  /**
+   * Claude waits for the person (a permission, a question), or no longer
+   * does: waiting, he stops typing and beckons; the wait over, a beckon still
+   * playing stops.
+   */
+  setWaiting(isWaiting: boolean, nowMs: number) {
+    if (!isWaiting) {
+      if (this.oneOff?.kind === 'beckon') {
+        this.oneOff = null
+      }
+      this.waitingSince = null
+      this.nextBeckonMs = null
+    } else if (this.waitingSince === null && this.isOn('attention')) {
+      this.waitingSince = nowMs
+      this.beckons = 0
+      this.nextBeckonMs = nowMs
+    }
+  }
+
+  /**
+   * How deep he sleeps, nothing else under way: `drowsy` a minute in, with
+   * nothing to see but slow z's, `still` ten minutes in, when nobody is likely
+   * to be looking; else `awake`.
+   */
+  sleepDepth(nowMs: number): 'awake' | 'drowsy' | 'still' {
+    const at = this.sleepsAt()
+    if (this.playing !== 'sleepy' || at === null) {
+      return 'awake'
+    }
+    const asleep = nowMs - at
+    return asleep > STILL_AFTER_MS ? 'still' : asleep > DROWSY_AFTER_MS ? 'drowsy' : 'awake'
+  }
+
+  /** When he dozes off: left alone two minutes, or left waiting five; null while a turn has him working. */
+  private sleepsAt() {
+    if (this.waitingSince !== null) {
+      return this.waitingSince + WAIT_AWAKE_MS
+    }
+    return this.runningTurns.size === 0 ? this.lastActivityMs + SLEEP_AFTER_MS : null
+  }
+
+  private isAsleep(nowMs: number) {
+    const at = this.sleepsAt()
+    return at !== null && nowMs > at
   }
 
   toolStarted(id: string, prop: Prop, nowMs: number) {
@@ -224,6 +351,7 @@ export class Pet {
   /** Settles which clip shows now; a change of mood starts it from its first frame. */
   sync(nowMs: number) {
     this.fidget(nowMs)
+    this.beckon(nowMs)
     let key: string
     let clip: string
     if (this.isHeld && this.has('held')) {
@@ -233,10 +361,11 @@ export class Pet {
       key = `once:${this.oneOff.serial}`
       clip = this.oneOff.clip
     } else {
+      // Waiting for the person, he stops typing.
       key =
-        this.runningTurns.size > 0
+        this.runningTurns.size > 0 && this.waitingSince === null
           ? 'working'
-          : nowMs - this.lastActivityMs > SLEEP_AFTER_MS
+          : this.isAsleep(nowMs)
             ? 'sleepy'
             : 'idle'
       clip = this.variantOf(key, nowMs)
@@ -307,8 +436,8 @@ export class Pet {
    */
   private fidget(nowMs: number) {
     const isIdle =
-      !this.isHeld && this.runningTurns.size === 0 && nowMs - this.lastActivityMs <= SLEEP_AFTER_MS
-    if (this.oneOff && moodOf(this.oneOff.clip) === 'fidget' && !isIdle) {
+      !this.isHeld && this.runningTurns.size === 0 && this.waitingSince === null && !this.isAsleep(nowMs)
+    if (this.oneOff?.kind === 'fidget' && !isIdle) {
       this.oneOff = null
     }
     if (!this.isOn('fidgets') || !isIdle || this.oneOff) {
@@ -323,9 +452,24 @@ export class Pet {
       const fidgets = Object.keys(this.manifest.clips).filter(clip => moodOf(clip) === 'fidget')
       const picked = fidgets[Math.floor(Math.random() * fidgets.length)]
       if (picked) {
-        this.play(picked)
+        this.begin({ clip: picked, length: this.framesOf(picked), priority: PRIORITY.fidget ?? 0, kind: 'fidget' })
       }
       this.nextFidgetMs = null
+    }
+  }
+
+  /**
+   * While Claude waits for the person, he waves at once, then says psst now
+   * and then, until he dozes off; a stronger clip playing puts it off.
+   */
+  private beckon(nowMs: number) {
+    if (this.nextBeckonMs === null || nowMs < this.nextBeckonMs || this.isHeld || this.isAsleep(nowMs)) {
+      return
+    }
+    const clip = this.beckons === 0 ? 'hello' : 'fidget-psst'
+    if (this.begin({ clip, length: this.framesOf(clip), priority: PRIORITY.hello ?? 2, kind: 'beckon' })) {
+      this.beckons += 1
+      this.nextBeckonMs = nowMs + BECKON_EVERY_MS
     }
   }
 

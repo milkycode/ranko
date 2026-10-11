@@ -13,6 +13,8 @@ import {
   logChunks,
   nextTasks,
   planLimits,
+  planReadingOf,
+  retryAfterMs,
   sessionOf,
   span,
   summaryOf,
@@ -232,5 +234,21 @@ describe('stats', () => {
       '1h 23m · 14 turns · 3 agents (Explore, Plan) · 1 shell · wakeup 16:42 · 1 loop · this turn 1m 5s, 1 tool',
     )
     expect(Math.round(busy.percent ?? 0)).toBe(40)
+  })
+
+  test('a reading of the limits from the store is taken only whole', () => {
+    const limits = [{ kind: 'five_hour', percentUsed: 68, resetsAt: '2030-01-07T17:40:00Z' }]
+    expect(planReadingOf({ at: 5, limits })).toEqual({ at: 5, limits })
+    expect(planReadingOf(undefined)).toBeNull()
+    expect(planReadingOf({ at: '5', limits })).toBeNull()
+    expect(planReadingOf({ at: 5, limits: [{ kind: 'five_hour' }] })).toBeNull()
+  })
+
+  test("a 429's retry-after waits its seconds, or until its date", () => {
+    const now = Date.parse('2030-01-07T12:00:00Z')
+    expect(retryAfterMs('120', now)).toBe(120_000)
+    expect(retryAfterMs('Mon, 07 Jan 2030 12:05:00 GMT', now)).toBe(300_000)
+    expect(retryAfterMs(undefined, now)).toBeNull()
+    expect(retryAfterMs('soon', now)).toBeNull()
   })
 })

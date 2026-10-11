@@ -128,3 +128,21 @@ pictures in `previews/`, which stay out of the repo (`blender/review.py`,
    has running, the background work and wakeups classic Stop reports, and the
    turn under way or the last one; its bar is how much of the five-hour
    window has passed.
+10. **Polish.** Kind words in German too; a resumed session's Ranko as
+   round as its context from the start. While Claude waits for the person
+   (`classic.PermissionRequest` with no hook's decision, `AskUserQuestion`,
+   `ExitPlanMode`) he stops typing, waves, then says psst every half minute
+   until the call goes on, dozing off after five minutes. A commit, a push or
+   a pull request (the Bash result's `gitOperation`) and a test run whose
+   output names no failure get a thumbs up that a turn's work doesn't cut
+   short. Props for the task list, `ToolSearch`, `LSP` and browsing MCP
+   tools. The main conversation's turn is told by its first request's
+   missing `agentId`, not by which turn started first. The usage endpoint's
+   reading goes in the store for every session to take while it is under a
+   minute old, and a 429's `retry-after` (else five minutes) holds them all
+   off. Asleep for a minute, Ranko is drawn four times a second, not every
+   frame: on the desktop each frame is a redraw carrying its PNG whole, some
+   38 KB. Ten minutes asleep, he holds still: no surface tells a mod whether
+   its window is in view, so a long sleep stands in for nobody looking.
+   Typing in the prompt (`prompt.edit`) wakes him. `/ranko` completes its
+   verbs, reactions and switches.

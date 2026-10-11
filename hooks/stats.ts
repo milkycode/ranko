@@ -237,6 +237,39 @@ export function planLimits(body: string): SessionRateLimit[] | null {
   return limits.length > 0 ? limits : null
 }
 
+/** A reading of the plan's limits from the usage endpoint, and when it was taken. */
+export type PlanReading = { limits: SessionRateLimit[]; at: number }
+
+/** A reading as the store keeps it, for any session to take; null for anything else. */
+export function planReadingOf(value: unknown): PlanReading | null {
+  const reading = value as { limits?: unknown; at?: unknown } | null | undefined
+  if (typeof reading?.at !== 'number' || !Array.isArray(reading.limits)) {
+    return null
+  }
+  const isLimit = (limit: unknown) => {
+    const l = limit as Record<string, unknown> | null
+    return (
+      typeof l?.kind === 'string' &&
+      typeof l.percentUsed === 'number' &&
+      (l.resetsAt === undefined || typeof l.resetsAt === 'string')
+    )
+  }
+  return reading.limits.every(isLimit) ? { limits: reading.limits as SessionRateLimit[], at: reading.at } : null
+}
+
+/** How long a 429's `retry-after` asks to wait, in seconds or until a date; null without one. */
+export function retryAfterMs(header: string | undefined, nowMs: number) {
+  if (header === undefined || header.trim() === '') {
+    return null
+  }
+  const seconds = Number(header)
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1000)
+  }
+  const at = Date.parse(header)
+  return Number.isNaN(at) ? null : Math.max(0, at - nowMs)
+}
+
 /** One item of Claude's task list, from TodoWrite or the Task tools. */
 export type Task = {
   id: string

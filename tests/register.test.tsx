@@ -2,6 +2,8 @@ import type { On, RenderElement, SessionRateLimit } from 'claude-code'
 import { describe, expect, mock, test, tier } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
+import { commandSuggestions, propFor } from '../hooks/pet'
+
 tier('user')
 
 // The clips a full bake produces (blender/clips.py lists those baked so far),
@@ -67,6 +69,8 @@ function answerTheWorld(
   autoCompactThreshold?: number,
   // What the plugin's store holds, read and written by it.
   stored: Record<string, unknown> = {},
+  // Told of every blit, by the key of the Image it swaps.
+  onBlit: (key: string) => void = () => {},
 ) {
   const clock = mock.clock(on)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -79,7 +83,10 @@ function answerTheWorld(
     stored[e.key] = e.value
     return { value: undefined }
   })
-  on('ui.blit', () => ({ value: {} }))
+  on('ui.blit', ($, e) => {
+    onBlit('key' in e ? e.key : '')
+    return { value: {} }
+  })
   on('ui.render', () => h(Fragment, null) as RenderElement)
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -497,7 +504,7 @@ describe('register', () => {
 
   for (const isOn of [true, false]) {
     test(`kind words make Ranko blush (blush ${isOn ? 'on' : 'off'})`, { options: { blush: isOn } }, async ($, on) => {
-      answerTheWorld(on)
+      const clock = answerTheWorld(on)
       on('prompt.submit', ($, e) => ({ text: e.text }))
       await $.session.start(START)
       const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -507,6 +514,16 @@ describe('register', () => {
       await submit('fix the parser please')
       expect(await shownClip(band)).toBe('idle')
       await submit('Thanks, that worked!')
+      expect(await shownClip(band)).toBe(isOn ? 'blush' : 'idle')
+      await clock.advance(2000)
+
+      // German too, whole words only: a Dankestext is no thanks.
+      await submit('Füge einen Dankestext ein')
+      expect(await shownClip(band)).toBe('idle')
+      await submit('Dankeschön, läuft!')
+      expect(await shownClip(band)).toBe(isOn ? 'blush' : 'idle')
+      await clock.advance(2000)
+      await submit('Gut gemacht')
       expect(await shownClip(band)).toBe(isOn ? 'blush' : 'idle')
       await band.unmount()
     })
@@ -866,14 +883,16 @@ describe('register', () => {
     expect(logs).toEqual([])
   })
 
-  test('a full context stuffs Ranko and compaction lets it out', async ($, on) => {
+  test('a full context stuffs Ranko from the start, and compaction lets it out', async ($, on) => {
+    // A resumed session's context is full before its first turn.
     answerTheWorld(on, 85)
     on('session.compact', ($, e) => ({ messages: e.messages }))
     await $.session.start(START)
     const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await shownClip(band)).toBe('idle-stuffed')
 
     await $.turn.start({ text: 'go', turnId: 't1' })
-    expect(await shownClip(band)).toBe('working')
+    expect(await shownClip(band)).toBe('working-stuffed')
     await complete($, 't1', 1000)
     expect(await shownClip(band)).toBe('idle-stuffed')
     await $.turn.start({ text: 'more', turnId: 't2' })
@@ -1015,5 +1034,242 @@ describe('register', () => {
     const shrunk = await band.find({ key: 'mini-a1-5' })
     expect([shrunk?.props.columns, shrunk?.props.rows]).toEqual([4, 2])
     await band.unmount()
+  })
+
+  test("a subagent's turn that starts first isn't taken for the main conversation's", async ($, on) => {
+    answerTheWorld(on)
+    on('tool.call', () => ({ result: 'ok', text: 'ok' }))
+    on('turn.step', async function* ($, e) {
+      return {
+        turnId: e.turnId,
+        index: e.index,
+        answer: '',
+        toolUses: [],
+        stopReason: 'end_turn' as const,
+        usage: { model: 'claude', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }
+    })
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    const step = async (turnId: string, agentId?: string) => {
+      for await (const _ of $.turn.step({ turnId, index: 0, model: 'claude', messageCount: 1, ...(agentId ? { agentId } : {}) })) {
+        // Nothing streams: the step's result is what counts.
+      }
+    }
+
+    // A background agent's turn starts first, then the main conversation's;
+    // their requests say whose is whose.
+    await $.turn.start({ text: '', turnId: 'a-turn' })
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    await step('a-turn', 'a1')
+    await step('t1')
+    await $.tool.call({ tool: 'Read', file_path: '/work/notes.md' } as never)
+    await complete($, 'a-turn', 3000, 'answer', 'a1')
+    await band.redraw()
+    expect(await band.find({ type: 'Text', text: /this turn \d+s, 1 tool$/ })).toBeDefined()
+
+    await complete($, 't1', 9000)
+    await band.redraw()
+    expect(await band.find({ type: 'Text', text: /· 1 turn · last 9s, 1 tool$/ })).toBeDefined()
+    await band.unmount()
+  })
+
+  test("another session's fresh reading of the limits stands in for asking the endpoint", async ($, on) => {
+    const stored: Record<string, unknown> = {}
+    const clock = answerTheWorld(on, 10, MANIFEST, [], undefined, stored)
+    stored.plan = {
+      at: clock.now() - 5000,
+      limits: [{ kind: 'five_hour', percentUsed: 68, resetsAt: '2030-01-07T17:40:00Z' }],
+    }
+    let asked = 0
+    on('session.authorize', () => ({ value: { handle: 'login', kind: 'bearer' as const } }))
+    on('http.fetch', () => {
+      asked += 1
+      const body = JSON.stringify({ five_hour: { utilization: 70, resets_at: '2030-01-07T17:40:00Z' } })
+      return { value: { status: 200, ok: true, headers: {}, text: body } }
+    })
+    await $.session.start(START)
+    await clock.settle()
+    expect(asked).toBe(0)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    await band.redraw()
+    expect(await band.find({ type: 'Text', text: /^5h 68% ↻/ })).toBeDefined()
+    await band.unmount()
+
+    // A minute on, that reading is stale: this session asks, and leaves its own.
+    await clock.advance(60_000)
+    expect(asked).toBe(1)
+    expect((stored.plan as { limits: { percentUsed: number }[] }).limits[0]?.percentUsed).toBe(70)
+  })
+
+  test('told to wait by a 429, no session asks the endpoint until the time is up', { timeoutMs: 20000 }, async ($, on) => {
+    const stored: Record<string, unknown> = {}
+    const clock = answerTheWorld(on, 10, MANIFEST, [], undefined, stored)
+    let asked = 0
+    on('session.authorize', () => ({ value: { handle: 'login', kind: 'bearer' as const } }))
+    on('http.fetch', () => {
+      asked += 1
+      const body = JSON.stringify({ five_hour: { utilization: 68, resets_at: '2030-01-07T17:40:00Z' } })
+      const busy: Record<string, string> = { 'retry-after': '150' }
+      return {
+        value:
+          asked === 1
+            ? { status: 429, ok: false, headers: busy, text: '' }
+            : { status: 200, ok: true, headers: {}, text: body },
+      }
+    })
+    const startedAt = clock.now()
+    await $.session.start(START)
+    await clock.settle()
+    expect(asked).toBe(1)
+    expect(stored.planWait).toBe(startedAt + 150_000)
+
+    await clock.advance(140_000)
+    expect(asked).toBe(1)
+    await clock.advance(80_000)
+    expect(asked).toBe(2)
+  })
+
+  const WITH_HELLO = JSON.stringify({
+    ...JSON.parse(MANIFEST),
+    clips: { ...JSON.parse(MANIFEST).clips, hello: { frames: 56, loop: false } },
+  })
+
+  test('waiting on a permission, Ranko stops typing, waves, then says psst, until the call goes on', { timeoutMs: 20000 }, async ($, on) => {
+    const clock = answerTheWorld(on, 10, WITH_HELLO)
+    let finish = () => {}
+    on('tool.call', () => new Promise(resolve => {
+      finish = () => resolve({ result: { stdout: '', stderr: '', interrupted: false }, text: 'ok' })
+    }))
+    on('classic.PermissionRequest', () => ({}))
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await clock.advance(3000)
+
+    await $.turn.start({ text: 'clean up', turnId: 't1' })
+    expect(await shownClip(band)).toBe('working')
+    const call = $.tool.call({ tool: 'Bash', command: 'rm -rf build' } as never)
+    await clock.settle()
+    await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build' } } as never)
+    expect(await shownClip(band)).toBe('hello')
+    await clock.advance(3000)
+    expect(await shownClip(band)).toBe('idle')
+    await clock.advance(27_500)
+    expect(await shownClip(band)).toBe('fidget-psst')
+
+    // Allowed: the call goes on, and so does he, at once.
+    finish()
+    await call
+    expect(await shownClip(band)).toBe('working')
+    await band.unmount()
+  })
+
+  for (const isOn of [true, false]) {
+    test(`a question for the person has him wave until it is answered (attention ${isOn ? 'on' : 'off'})`, { options: { attention: isOn } }, async ($, on) => {
+      const clock = answerTheWorld(on, 10, WITH_HELLO)
+      let answer = () => {}
+      on('tool.call', () => new Promise(resolve => {
+        answer = () => resolve({ result: {}, text: 'ok' })
+      }))
+      await $.session.start(START)
+      const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+      await clock.advance(3000)
+
+      await $.turn.start({ text: 'plan it', turnId: 't1' })
+      const call = $.tool.call({ tool: 'AskUserQuestion', questions: [] } as never)
+      await clock.settle()
+      expect(await shownClip(band)).toBe(isOn ? 'hello' : 'working')
+      answer()
+      await call
+      expect(await shownClip(band)).toBe('working')
+      await band.unmount()
+    })
+  }
+
+  for (const isOn of [true, false]) {
+    test(`a commit or a passing test run gets a thumbs up (thumbsUp ${isOn ? 'on' : 'off'})`, { options: { thumbsUp: isOn } }, async ($, on) => {
+      const clock = answerTheWorld(on)
+      on('tool.call', ($, e) => {
+        const command = (e as { command?: string }).command ?? ''
+        const run = { stderr: '', interrupted: false }
+        if (command.startsWith('git commit')) {
+          return { result: { ...run, stdout: '', gitOperation: { commit: { sha: 'abc', kind: 'committed' } } }, text: 'ok' }
+        }
+        return { result: { ...run, stdout: command.includes('broken') ? 'Tests: 1 failed, 4 passed' : 'Tests: 5 passed' }, text: 'ok' }
+      })
+      await $.session.start(START)
+      const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+      await $.turn.start({ text: 'ship it', turnId: 't1' })
+
+      // Piped through tail a failed run ends well; its output says otherwise.
+      await $.tool.call({ tool: 'Bash', command: 'npm test -- broken 2>&1 | tail -5' } as never)
+      expect(await shownClip(band)).toBe('working')
+      await $.tool.call({ tool: 'Bash', command: 'npm test 2>&1 | tail -5' } as never)
+      expect(await shownClip(band)).toBe(isOn ? 'fidget-thumbs' : 'working')
+      await clock.advance(2000)
+
+      // A commit; the turn's work doesn't cut the thumbs up short.
+      await $.tool.call({ tool: 'Bash', command: 'git commit -m "Ship it"' } as never)
+      expect(await shownClip(band)).toBe(isOn ? 'fidget-thumbs' : 'working')
+      await clock.advance(500)
+      expect(await shownClip(band)).toBe(isOn ? 'fidget-thumbs' : 'working')
+      await band.unmount()
+    })
+  }
+
+  test('browsing tools get the binoculars, the task list the notepad', () => {
+    expect(propFor('mcp__claude-in-chrome__navigate')).toBe('binoculars')
+    expect(propFor('mcp__playwright__browser_click')).toBe('binoculars')
+    expect(propFor('mcp__Claude_Browser__screenshot')).toBe('binoculars')
+    expect(propFor('TodoWrite')).toBe('notepad')
+    expect(propFor('TaskUpdate')).toBe('notepad')
+    expect(propFor('ToolSearch')).toBe('magnifier')
+    expect(propFor('mcp__github__create_issue')).toBeUndefined()
+    expect(propFor('Bash')).toBeUndefined()
+  })
+
+  test('asleep a good while, he is drawn a few times a second, then not at all', { timeoutMs: 90000 }, async ($, on) => {
+    const drawn: number[] = []
+    const clock = answerTheWorld(on, 10, MANIFEST, [], undefined, {}, key => {
+      if (key === 'ranko') {
+        drawn.push(clock.now())
+      }
+    })
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    const drawsIn = async (ms: number) => {
+      const from = clock.now()
+      await clock.advance(ms)
+      return drawn.filter(at => at > from).length
+    }
+
+    expect(await drawsIn(1000)).toBeGreaterThanOrEqual(20)
+    // Two minutes alone he dozes off; a minute after, he is drawn less often.
+    await clock.advance(3 * 60_000 + 1000)
+    expect(await drawsIn(1000)).toBeLessThanOrEqual(5)
+    // Ten minutes asleep, nobody is looking: he holds still. (A minute at a
+    // time: the mock clock runs so many timers per advance.)
+    for (let minute = 0; minute < 10; minute += 1) {
+      await clock.advance(60_000)
+    }
+    expect(await drawsIn(1000)).toBe(0)
+    // A turn wakes him, and every frame is drawn again.
+    await $.turn.start({ text: 'wake up', turnId: 't1' })
+    expect(await drawsIn(1000)).toBeGreaterThanOrEqual(20)
+    await band.unmount()
+  })
+
+  test('/ranko completes its verbs, reactions and switches as they are typed', () => {
+    const typeahead = (text: string) => {
+      const token = text.split(/\s+/).pop() ?? ''
+      const rows = commandSuggestions(text, text.length - token.length, token, Object.keys(CLIPS), feature => feature !== 'sounds')
+      return rows.map(row => `${row.text}${row.description.endsWith('now') ? ` (${row.description})` : ''}`)
+    }
+
+    expect(typeahead('/ranko ha')).toEqual(['happy'])
+    expect(typeahead('/ranko co')).toEqual(['collapse'])
+    expect(typeahead('/ranko off s')).toEqual(['stuffing (on now)', 'sounds (off now)', 'stats (on now)'])
+    expect(typeahead('/ranko happy x')).toEqual([])
+    expect(typeahead('/rankoo ha')).toEqual([])
   })
 })
