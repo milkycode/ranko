@@ -40,7 +40,7 @@ will land, and he moves when you let go. On Windows the desktop app is the
 easy way to meet him; in a terminal, run Claude Code in WSL inside kitty
 (WSLg).
 
-![Ranko above the prompt in the Claude desktop app, beside the context, cache, limits and session](docs/desktop.png)
+![Ranko breathing above the prompt in the Claude desktop app, beside the context, cache, limits and session](docs/desktop.gif)
 
 Meet him and rankello® at [rankello.ai](https://rankello.ai). Developed and
 maintained by [milkycode®](https://www.milkycode.com).
