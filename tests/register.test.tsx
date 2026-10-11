@@ -1,4 +1,4 @@
-import type { On, RenderElement } from 'claude-code'
+import type { On, RenderElement, SessionRateLimit } from 'claude-code'
 import { describe, expect, mock, test, tier } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
@@ -59,7 +59,7 @@ const COMMAND = { origin: { kind: 'composer' }, presentation: { isFullscreen: fa
  * commands, blits, turns, the context's fill, and an empty band, which is
  * what the engine draws there.
  */
-function answerTheWorld(on: On, contextPercent = 10, manifest = MANIFEST) {
+function answerTheWorld(on: On, contextPercent = 10, manifest = MANIFEST, rateLimits: SessionRateLimit[] = []) {
   const clock = mock.clock(on)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   // A frame's bytes are its path, so a test can tell which frame the
@@ -73,7 +73,11 @@ function answerTheWorld(on: On, contextPercent = 10, manifest = MANIFEST) {
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.usage', () => ({
-    value: { startedAt: 0, context: { window: 200000, percent: contextPercent }, rateLimits: [] },
+    value: {
+      startedAt: 0,
+      context: { window: 200000, percent: contextPercent, tokens: contextPercent * 2000 },
+      rateLimits,
+    },
   }))
   return clock
 }
@@ -503,6 +507,131 @@ describe('register', () => {
     await band.redraw()
     expect(await band.find({ key: 'mini-a1' })).toBeUndefined()
     await band.unmount()
+  })
+
+  test('beside him the stats show the context, the cache and the limits', async ($, on) => {
+    const limits = [
+      { kind: 'five_hour', percentUsed: 23, resetsAt: '2030-01-07T17:40:00Z' },
+      { kind: 'seven_day', percentUsed: 41, resetsAt: '2030-01-13T09:00:00Z' },
+    ]
+    answerTheWorld(on, 42, MANIFEST, limits)
+    on('turn.step', async function* ($, e) {
+      return {
+        turnId: e.turnId,
+        index: e.index,
+        answer: '',
+        toolUses: [],
+        stopReason: 'end_turn' as const,
+        usage: {
+          model: 'claude',
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_read_input_tokens: 9000,
+          cache_creation_input_tokens: 900,
+        },
+      }
+    })
+    await $.session.start(START)
+
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      expect(await band.find({ type: 'Text', text: '42% · 84k / 200k' })).toBeDefined()
+      expect(await band.find({ type: 'Text', text: /^5h 23% \(.+\) · 7d 41% \(.+\)$/ })).toBeDefined()
+      expect((await band.find({ key: 'compact' }))?.props.variant).toBe('secondary')
+      await band.unmount()
+    }
+
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await band.find({ type: 'Text', text: 'no request yet' })).toBeDefined()
+    // A Claude plan keeps the cache an hour after its last use.
+    for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude', messageCount: 1 })) {
+      // Nothing streams: the step's result is what counts.
+    }
+    await band.redraw()
+    expect(await band.find({ type: 'Text', text: 'warm · 60m left · 90% read' })).toBeDefined()
+    await band.unmount()
+  })
+
+  test('stats off: the band holds Ranko alone', { options: { stats: false } }, async ($, on) => {
+    answerTheWorld(on)
+    await $.session.start(START)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      expect(await band.find({ key: 'stats' })).toBeUndefined()
+      await band.unmount()
+    }
+  })
+
+  test('the Compact button stands out from 80%, compacts, and logs the summary in whole lines', async ($, on) => {
+    answerTheWorld(on, 85)
+    const logs: string[] = []
+    on('ui.log', ($, e) => {
+      logs.push(e.text)
+      return { value: undefined }
+    })
+    // Six paragraphs of some 450 characters: more than one log line holds.
+    const summary = Array.from({ length: 6 }, (_, i) => `Paragraph ${i}: ${'word '.repeat(88).trim()}.`).join('\n\n')
+    on('session.compact', () => ({
+      messages: [{ role: 'user' as const, text: summary, toolUses: [] }],
+      tokensBefore: 170000,
+      tokensAfter: 12000,
+    }))
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+    expect((await band.find({ key: 'compact' }))?.props.variant).toBe('primary')
+    await band.press({ key: 'compact' })
+    expect(logs[0]).toBe('Compacted from 170k to 12k tokens. The summary Claude carries on with:')
+    const lines = logs.slice(1)
+    expect(lines.length).toBe(2)
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(2000)
+      expect(line.startsWith('Paragraph ')).toBe(true)
+    }
+    expect(lines.join('\n\n')).toBe(summary)
+    await band.unmount()
+  })
+
+  test('/compact logs its summary too; a precomputed one neither logs nor deflates', async ($, on) => {
+    answerTheWorld(on, 85)
+    const logs: string[] = []
+    on('ui.log', ($, e) => {
+      logs.push(e.text)
+      return { value: undefined }
+    })
+    on('session.compact', () => ({
+      messages: [{ role: 'user' as const, text: 'What happened so far.', toolUses: [] }],
+      tokensBefore: 170000,
+      tokensAfter: 9000,
+    }))
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    await complete($, 't1', 1000)
+    expect(await shownClip(band)).toBe('idle-stuffed')
+
+    const messages = [{ role: 'user', text: 'go', toolUses: [] }]
+    await $.session.compact({ trigger: 'precompute', messages } as never)
+    expect(logs).toEqual([])
+    expect(await shownClip(band)).toBe('idle-stuffed')
+
+    await $.session.compact({ trigger: 'manual', messages } as never)
+    expect(logs).toEqual(['Compacted from 170k to 9k tokens. The summary Claude carries on with:', 'What happened so far.'])
+    expect(await shownClip(band)).toBe('deflate')
+    await band.unmount()
+  })
+
+  test('compaction summaries off: nothing is logged', { options: { compactSummary: false } }, async ($, on) => {
+    answerTheWorld(on)
+    const logs: string[] = []
+    on('ui.log', ($, e) => {
+      logs.push(e.text)
+      return { value: undefined }
+    })
+    on('session.compact', () => ({ messages: [{ role: 'user' as const, text: 'Summary.', toolUses: [] }] }))
+    await $.session.start(START)
+    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'go', toolUses: [] }] } as never)
+    expect(logs).toEqual([])
   })
 
   test('a full context stuffs Ranko and compaction lets it out', async ($, on) => {

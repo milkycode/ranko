@@ -7,7 +7,18 @@
  * blits what it says.
  */
 
-export const FEATURES = ['drag', 'pats', 'toolProps', 'miniRankos', 'stuffing', 'blush', 'fidgets', 'sounds'] as const
+export const FEATURES = [
+  'drag',
+  'pats',
+  'toolProps',
+  'miniRankos',
+  'stuffing',
+  'blush',
+  'fidgets',
+  'sounds',
+  'stats',
+  'compactSummary',
+] as const
 export type Feature = (typeof FEATURES)[number]
 
 export type ClipInfo = {

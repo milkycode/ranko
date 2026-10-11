@@ -71,6 +71,20 @@
       "description": "Little sounds for pats, jumps, wobbles, blushes, being picked up and put down, deflating and dozing off. They play on macOS; elsewhere Ranko stays silent.",
       "required": false,
       "default": true
+    },
+    "stats": {
+      "type": "boolean",
+      "title": "Session stats",
+      "description": "Beside Ranko: how full the context is, whether the prompt cache is still warm and for how long, your plan's usage limits, and a Compact button that stands out once the context is 80% full.",
+      "required": false,
+      "default": true
+    },
+    "compactSummary": {
+      "type": "boolean",
+      "title": "Compaction summaries",
+      "description": "After /compact or the Compact button, the summary Claude carries on with is shown in the conversation, under a line with the tokens before and after. The lines are for you; Claude doesn't read them.",
+      "required": false,
+      "default": true
     }
   },
   "license": "MIT"

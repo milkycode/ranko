@@ -15,6 +15,13 @@ to edit, binoculars for the web. He grows rounder as the context fills and
 lets it out with a sigh on compaction, and he sits down and gets up between
 all of these rather than jumping.
 
+Beside him the band shows how full the context is, how long the prompt cache
+stays warm, and your plan's 5-hour and weekly limits, with a Compact button
+that stands out once the context is 80% full. After a compaction, by the
+button or `/compact`, the conversation shows the summary Claude carries on
+with, under a line with the tokens before and after; Claude doesn't read
+those lines.
+
 It is a Claude Code mod: frames baked in Blender, played above the prompt.
 In a terminal they play by swapping an `Image`'s source with `$.ui.blit`,
 which needs the kitty graphics protocol (kitty, Ghostty); in other terminals
@@ -54,9 +61,12 @@ claude --plugin-dir path/to/ranko
 - `/ranko <reaction>` plays one of his reactions, e.g. `/ranko hello`.
 - `/ranko list` shows every reaction, and every switch with its state.
 - `/ranko on <switch>` / `/ranko off <switch>` flips a switch: `drag`,
-  `pats`, `toolProps`, `miniRankos`, `stuffing`, `blush`, `fidgets`, `sounds`.
+  `pats`, `toolProps`, `miniRankos`, `stuffing`, `blush`, `fidgets`, `sounds`,
+  `stats`, `compactSummary`.
 
-Sounds play on macOS only.
+Sounds play on macOS only. The cache's countdown assumes an hour on a Claude
+plan and five minutes on an API key: Claude Code doesn't say which one it
+asked for.
 
 ## How he is made
 

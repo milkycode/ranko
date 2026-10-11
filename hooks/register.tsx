@@ -1,11 +1,22 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-import type { EngineInterface, On, PluginOptions, RenderElement } from 'claude-code'
+import type {
+  Elements,
+  EngineInterface,
+  On,
+  PluginOptions,
+  RenderElement,
+  SessionCompacted,
+  SessionMessage,
+  SessionUsage,
+} from 'claude-code'
 
 import type { GrabMessage, GrabProps } from './grab'
 import { FEATURES, LEAVE_FRAMES, PROP_FOR_TOOL, Pet, isManifest, moodOf, sizeFor } from './pet'
 import type { Feature, Manifest, Mini } from './pet'
+import { COMPACT_AT, bar, cacheText, cacheTtl, contextOf, limitsText, logChunks, summaryOf, tokens } from './stats'
+import type { CacheReading } from './stats'
 
 /**
  * Ranko above the prompt: frames baked by blender/bake.py, played
@@ -22,6 +33,11 @@ import type { Feature, Manifest, Mini } from './pet'
  * The desktop shows nothing new in the band while a button is held, so a
  * dragged Ranko moves there only when he is let go; until then the grab
  * region, which it does draw, shows where he will land (grab.tsx).
+ *
+ * Beside him the band shows how full the context is, how long the prompt
+ * cache stays warm and the plan's usage limits, with a Compact button
+ * (stats.ts); after a compaction the transcript shows the summary Claude
+ * carries on with, in log lines the model doesn't read.
  */
 
 type Host = {
@@ -63,7 +79,17 @@ type Ranko = {
   // would shift under the pointer while it reports columns against it, and
   // the pet would jitter.
   grab: { offset: number; downColumn: number; isMoved: boolean; regionLeft: number } | null
+  // The last reading of the context and the plan's limits, for the stats.
+  usage: SessionUsage | null
+  // What the main conversation's last request did with the prompt cache.
+  cache: CacheReading | null
+  isCompacting: boolean
+  // Compactions logged so far: the Compact button logs its own when the
+  // session.compact hook didn't.
+  compactLogs: number
 }
+
+type StatsElements = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
 const KEY = 'ranko'
 // A turn shorter than this ends without a celebration: quick answers would
@@ -88,6 +114,15 @@ const DESKTOP_CELL_PX = { width: 10, height: 24 }
 const FRAME_CACHE = 256
 // The most an Svg's source may hold.
 const SVG_LIMIT = 131072
+// The stats beside Ranko take at least this many columns and at most this
+// many, kept this far from him.
+const STATS_MIN_COLUMNS = 34
+const STATS_MAX_COLUMNS = 60
+const STATS_GAP = 2
+const STATS_LABEL_COLUMNS = 8
+// How often the stats read the session again between turns: the cache's
+// countdown moves by the minute.
+const STATS_EVERY_MS = 30_000
 
 const clamp = (value: number, low: number, high: number) =>
   Math.max(low, Math.min(high, Math.round(value)))
@@ -164,6 +199,128 @@ function miniPlaces(s: Ranko, pet: Pet, petLeft: number, columns: number, miniCo
   return places
 }
 
+/** The columns Ranko, his minis and their count take in the strip. */
+function takenColumns(pet: Pet, petLeft: number, columns: number, places: { x: number }[], miniColumns: number) {
+  const lefts = [petLeft, ...places.map(p => p.x), ...(pet.extraMinis > 0 ? [Math.max(0, petLeft - 4)] : [])]
+  const rights = [petLeft + columns, ...places.map(p => p.x + miniColumns)]
+  return { from: Math.min(...lefts), to: Math.max(...rights) }
+}
+
+/**
+ * Where the stats fit in the strip: left of Ranko and his minis, or right of
+ * them when he was dragged too far left; null when neither side has room.
+ */
+function statsPlace(bandColumns: number, from: number, to: number) {
+  const leftRoom = from - STATS_GAP
+  if (leftRoom >= STATS_MIN_COLUMNS) {
+    return { left: 0, width: Math.min(leftRoom, STATS_MAX_COLUMNS) }
+  }
+  const rightRoom = bandColumns - to - STATS_GAP
+  if (rightRoom >= STATS_MIN_COLUMNS) {
+    return { left: to + STATS_GAP, width: Math.min(rightRoom, STATS_MAX_COLUMNS) }
+  }
+  return null
+}
+
+async function readUsage($: EngineInterface, s: Ranko) {
+  s.usage = await $.session.usage().catch(() => s.usage)
+}
+
+/** Logs a compaction: the tokens before and after, then the summary in lines drawn whole. */
+function logCompaction(
+  $: EngineInterface,
+  s: Ranko,
+  before: readonly SessionMessage[],
+  result: SessionCompacted,
+  tokensBefore?: number,
+) {
+  s.compactLogs += 1
+  if (!s.isOn('compactSummary')) {
+    return
+  }
+  const from = result.tokensBefore ?? tokensBefore
+  const to = result.tokensAfter
+  $.ui.log(
+    `Compacted from ${from === undefined ? '?' : tokens(from)} to ${to === undefined ? '?' : tokens(to)} tokens. ` +
+      'The summary Claude carries on with:',
+  )
+  const summary = summaryOf(before, result.messages) ?? 'No summary was found in the compacted conversation.'
+  for (const line of logChunks(summary)) {
+    $.ui.log(line)
+  }
+}
+
+/** The Compact button's press: /compact's own call, between turns. */
+async function compactNow($: EngineInterface, s: Ranko) {
+  if (s.isCompacting) {
+    return
+  }
+  s.isCompacting = true
+  $.ui.invalidate('ui.render')
+  const logged = s.compactLogs
+  try {
+    const result = await $.session.compact()
+    if (result.skip !== undefined) {
+      $.ui.toast(`Not compacted: ${result.skip}`)
+    } else if (s.compactLogs === logged) {
+      logCompaction($, s, [], result)
+    }
+  } catch (error) {
+    $.ui.toast(`Couldn't compact: ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    s.isCompacting = false
+    await readUsage($, s)
+    $.ui.invalidate('ui.render')
+  }
+}
+
+/**
+ * The stats beside Ranko, the same on every surface: a row each for the
+ * context, the cache and the limits, a dim label and its reading, and the
+ * Compact button under them, which stands out once the context is nearly full.
+ */
+function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: number, onCompact: () => void) {
+  const { Box, Text, Button } = el
+  const context = contextOf(s.usage)
+  const limits = s.usage ? limitsText(s.usage.rateLimits, nowMs) : null
+  const isFull = (context?.percent ?? 0) >= COMPACT_AT
+  const color = (percent: number) => (percent >= COMPACT_AT ? 'error' : percent >= 50 ? 'warning' : 'success')
+  const row = (key: string, label: string, value: RenderElement) => (
+    <Box key={key} flexDirection="row">
+      <Box width={STATS_LABEL_COLUMNS}>
+        <Text dimColor>{label}</Text>
+      </Box>
+      {value}
+    </Box>
+  )
+  return (
+    <Box flexDirection="column" width={width} height={rows} overflow="hidden">
+      {row(
+        'context',
+        'Context',
+        context ? (
+          <Box flexDirection="row" gap={1}>
+            <Text color={color(context.percent)}>{bar(context.percent)}</Text>
+            <Text wrap="truncate">{context.text}</Text>
+          </Box>
+        ) : (
+          <Text dimColor>no reading yet</Text>
+        ),
+      )}
+      {row('cache', 'Cache', <Text wrap="truncate">{cacheText(s.cache, cacheTtl(s.usage), nowMs)}</Text>)}
+      {limits ? row('limits', 'Limits', <Text wrap="truncate">{limits}</Text>) : null}
+      <Box flexDirection="row">
+        <Button
+          key="compact"
+          label={s.isCompacting ? 'Compacting…' : 'Compact'}
+          variant={isFull ? 'primary' : 'secondary'}
+          onPress={onCompact}
+        />
+      </Box>
+    </Box>
+  )
+}
+
 /** The pet's left column in a band this wide: where it was left, or the right end. */
 const leftIn = (s: Ranko, columns: number, petColumns: number) =>
   clamp(s.left ?? columns - petColumns, 0, Math.max(0, columns - petColumns))
@@ -222,6 +379,14 @@ function start($: EngineInterface, s: Ranko) {
     $.clock.every(Math.round(1000 / manifest.fps), () => {
       void tick(s).catch(() => undefined)
     })
+    $.clock.every(STATS_EVERY_MS, () => {
+      if (s.isOn('stats') && s.isShown) {
+        void readUsage($, s).then(() => host.invalidate())
+      }
+    })
+    if (s.isOn('stats')) {
+      await readUsage($, s)
+    }
   })()
   return s.starting
 }
@@ -279,6 +444,10 @@ export function register(on: On, options: PluginOptions) {
     petColumns: 0,
     sizeSuffix: '',
     grab: null,
+    usage: null,
+    cache: null,
+    isCompacting: false,
+    compactLogs: 0,
   }
 
   on('session.start', async ($, e, next) => {
@@ -404,12 +573,52 @@ export function register(on: On, options: PluginOptions) {
     return result
   })
 
+  // What each request of the main conversation did with the prompt cache:
+  // its use keeps the cache warm for another stretch.
+  on('turn.step', async function* ($, e, next) {
+    const result = yield* next(e)
+    if (!e.agentId && result.usage) {
+      const { input_tokens, cache_read_input_tokens, cache_creation_input_tokens } = result.usage
+      s.cache = {
+        at: await $.clock.now(),
+        input: input_tokens,
+        read: cache_read_input_tokens,
+        written: cache_creation_input_tokens,
+      }
+      if (s.isOn('stats')) {
+        void readUsage($, s).then(() => $.ui.invalidate('ui.render'))
+      }
+    }
+    return result
+  })
+
+  // A resumed conversation's cache dates from its last response.
+  on('classic.SessionStart', async ($, e, next) => {
+    if (e.seconds_since_last_response !== undefined) {
+      const at = (await $.clock.now()) - e.seconds_since_last_response * 1000
+      s.cache = { at, input: 0, read: 0, written: 0 }
+    }
+    return next(e)
+  })
+
   on('session.compact', async ($, e, next) => {
+    const tokensBefore = s.usage?.context.tokens
     const result = await next(e)
+    // A subagent's, a precomputed or a vetoed compaction leaves the
+    // conversation as it was.
+    if (e.agentId || e.trigger === 'precompute' || result.skip !== undefined) {
+      return result
+    }
     // Only a stuffed or plump Ranko has anything to let out.
-    if (s.pet && !e.agentId && s.isOn('stuffing') && s.pet.size !== 'normal') {
+    if (s.pet && s.isOn('stuffing') && s.pet.size !== 'normal') {
       s.pet.play('deflate')
       s.pet.size = 'normal'
+    }
+    if (e.trigger === 'manual' || e.trigger === 'plugin') {
+      logCompaction($, s, e.messages, result, tokensBefore)
+    }
+    if (s.isOn('stats')) {
+      void readUsage($, s).then(() => $.ui.invalidate('ui.render'))
     }
     return result
   })
@@ -495,7 +704,7 @@ export function register(on: On, options: PluginOptions) {
         return below
       }
 
-      const { Box, Client, Svg, Text } = $.ui.resolve(e)
+      const { Box, Button, Client, Svg, Text } = $.ui.resolve(e)
       const isGrabbable = s.isOn('drag') || s.isOn('pats')
       const grabProps: GrabProps = {
         left: 0,
@@ -503,6 +712,8 @@ export function register(on: On, options: PluginOptions) {
         rows: size.rows,
         pet: { left: petLeft, columns: size.columns, isDraggable: s.isOn('drag') },
       }
+      const taken = takenColumns(pet, petLeft, size.columns, places, mini.columns)
+      const place = s.isOn('stats') ? statsPlace(s.bandColumns, taken.from, taken.to) : null
       return (
         <Box flexDirection="column">
           {below}
@@ -526,6 +737,14 @@ export function register(on: On, options: PluginOptions) {
             {isGrabbable ? (
               <Box position="absolute" left={0} top={0}>
                 <Client key="grab" module="./grab.tsx" props={grabProps} />
+              </Box>
+            ) : null}
+            {/* Over the grab strip, so the Compact button gets its presses. */}
+            {place ? (
+              <Box key="stats" position="absolute" left={place.left} top={0}>
+                {stats({ Box, Text, Button }, s, await $.clock.now(), place.width, size.rows, () => {
+                  void compactNow($, s)
+                })}
               </Box>
             ) : null}
           </Box>
@@ -554,7 +773,7 @@ export function register(on: On, options: PluginOptions) {
     s.bandColumns = e.props.bodyColumns
     pet.sync(await $.clock.now())
 
-    const { Box, Image, Client, Text } = await $.ui.resolve(e)
+    const { Box, Button, Image, Client, Text } = await $.ui.resolve(e)
     // A short band (agents listed under the prompt take its rows) gets a
     // smaller Ranko, same shape, rather than none.
     const rows = Math.min(manifest.rows, e.props.maxRows)
@@ -568,7 +787,8 @@ export function register(on: On, options: PluginOptions) {
     const miniRows = Math.max(2, Math.floor(rows / 2))
     const miniColumns = Math.round((manifest.columns * miniRows) / manifest.rows)
     const working = pet.framesOf('working')
-    const minis: RenderElement[] = miniPlaces(s, pet, petLeft, columns, miniColumns).map(({ mini, x }) => (
+    const places = miniPlaces(s, pet, petLeft, columns, miniColumns)
+    const minis: RenderElement[] = places.map(({ mini, x }) => (
       <Box key={`mini-slot-${mini.id}`} position="absolute" left={x} top={rows - miniRows}>
         <Image
           key={`mini-${mini.id}${s.sizeSuffix}`}
@@ -583,6 +803,8 @@ export function register(on: On, options: PluginOptions) {
     const isGrabbable = s.isOn('drag') || s.isOn('pats')
     const grabLeft = s.grab?.regionLeft ?? petLeft
     const grabProps: GrabProps = { left: grabLeft, columns, rows }
+    const taken = takenColumns(pet, petLeft, columns, places, miniColumns)
+    const place = s.isOn('stats') ? statsPlace(s.bandColumns, taken.from, taken.to) : null
 
     // The pet has its own strip; inside it the picture and, on top, the
     // invisible grab region sit at the same column.
@@ -608,6 +830,13 @@ export function register(on: On, options: PluginOptions) {
           {isGrabbable ? (
             <Box position="absolute" left={grabLeft} top={0}>
               <Client key="grab" module="./grab.tsx" props={grabProps} />
+            </Box>
+          ) : null}
+          {place ? (
+            <Box key="stats" position="absolute" left={place.left} top={0}>
+              {stats({ Box, Text, Button }, s, await $.clock.now(), place.width, rows, () => {
+                void compactNow($, s)
+              })}
             </Box>
           ) : null}
         </Box>
