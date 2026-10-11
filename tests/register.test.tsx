@@ -745,6 +745,45 @@ describe('register', () => {
     }
   })
 
+  test("the session's bar shows the five-hour window passed from the start, by this session's own limits too", async ($, on) => {
+    // No login for the usage endpoint: the limits are what the session's
+    // last response reported. Two hours into the five-hour window: 40%.
+    const own: SessionRateLimit[] = []
+    const clock = answerTheWorld(on, 10, MANIFEST, own)
+    own.push({ kind: 'five_hour', percentUsed: 23, resetsAt: new Date(clock.now() + 3 * 3_600_000).toISOString() })
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    await band.redraw()
+    expect(await band.find({ key: 'session' })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: '████░░░░░░' })).toBeDefined()
+    await band.unmount()
+  })
+
+  test('until the usage endpoint answers, it is asked again within seconds, not a minute', async ($, on) => {
+    const clock = answerTheWorld(on, 10)
+    let asked = 0
+    on('session.authorize', () => ({ value: { handle: 'login', kind: 'bearer' as const } }))
+    on('http.fetch', () => {
+      asked += 1
+      const body = JSON.stringify({ five_hour: { utilization: 68, resets_at: '2030-01-07T17:40:00Z' } })
+      return { value: asked === 1 ? { status: 503, ok: false, headers: {}, text: '' } : { status: 200, ok: true, headers: {}, text: body } }
+    })
+    await $.session.start(START)
+    await clock.settle()
+    expect(asked).toBe(1)
+
+    await clock.advance(10_000)
+    expect(asked).toBe(2)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    await band.redraw()
+    expect(await band.find({ type: 'Text', text: /^5h 68% ↻/ })).toBeDefined()
+    await band.unmount()
+
+    // Answered: a minute until the next time.
+    await clock.advance(30_000)
+    expect(asked).toBe(2)
+  })
+
   test('stats off: the band holds Ranko alone', { options: { stats: false } }, async ($, on) => {
     answerTheWorld(on)
     await $.session.start(START)

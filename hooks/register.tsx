@@ -120,6 +120,11 @@ type Ranko = {
   // The five-hour window's readings from the usage endpoint, for its pace;
   // a new window starts them over.
   fiveHour: { resetsAt?: string; samples: LimitSample[] }
+  // When the usage endpoint and the context's breakdown were last asked,
+  // and how often in a row the endpoint has had nothing.
+  planAskedAt: number | null
+  planMisses: number
+  autoCompactReadAt: number | null
   // Claude's task list in the main conversation.
   tasks: Task[]
   // For the session row: the main conversation's turns, the one under way
@@ -177,6 +182,10 @@ const FOLD_COLUMNS = 6
 // the plan's limits, which other sessions use up too.
 const STATS_EVERY_MS = 10_000
 const PLAN_EVERY_MS = 60_000
+// Until the endpoint has answered, it is asked again sooner, a few times: a
+// session's login can come a moment after the session starts.
+const PLAN_RETRY_MS = 10_000
+const PLAN_RETRIES = 6
 const PLAN_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 // The five-hour window's readings are kept this long, for its recent pace.
 const SAMPLES_KEPT_MS = 60 * 60_000
@@ -302,6 +311,8 @@ async function countTurns($: EngineInterface, s: Ranko) {
  * with the session's own login; an API key or another provider has none.
  */
 async function readPlan($: EngineInterface, s: Ranko) {
+  s.planAskedAt = await $.clock.now()
+  s.planMisses += 1
   try {
     const auth = await $.session.authorize()
     s.isPlan = auth?.kind === 'bearer'
@@ -316,6 +327,7 @@ async function readPlan($: EngineInterface, s: Ranko) {
     if (limits) {
       const at = await $.clock.now()
       s.plan = { limits, at }
+      s.planMisses = 0
       const fiveHour = limits.find(limit => limit.kind === 'five_hour')
       if (fiveHour) {
         const isSameWindow = isSameReset(s.fiveHour.resetsAt, fiveHour.resetsAt)
@@ -328,8 +340,31 @@ async function readPlan($: EngineInterface, s: Ranko) {
   }
 }
 
+/** Whether the endpoint is due again: a minute on, or sooner while it has never answered. */
+function isPlanDue(s: Ranko, nowMs: number) {
+  if (s.planAskedAt === null) {
+    return true
+  }
+  const wait = s.plan === null && s.planMisses < PLAN_RETRIES ? PLAN_RETRY_MS : PLAN_EVERY_MS
+  return nowMs - s.planAskedAt >= wait
+}
+
+/**
+ * Reads what the stats show: the session every time, the usage endpoint and
+ * where auto-compaction runs when they are due.
+ */
+async function readStats($: EngineInterface, s: Ranko) {
+  const now = await $.clock.now()
+  await Promise.all([
+    readUsage($, s),
+    isPlanDue(s, now) ? readPlan($, s) : null,
+    s.autoCompactReadAt === null || now - s.autoCompactReadAt >= PLAN_EVERY_MS ? readAutoCompact($, s) : null,
+  ])
+}
+
 /** Reads where auto-compaction runs, from the context's breakdown, estimated locally. */
 async function readAutoCompact($: EngineInterface, s: Ranko) {
+  s.autoCompactReadAt = await $.clock.now()
   try {
     const { breakdown } = (await $.session.usage({ breakdown: 'summary' })).context
     if (breakdown) {
@@ -412,6 +447,9 @@ function stats(
   const cache = cacheOf(s.cache, cacheTtl(s.isPlan), nowMs)
   const limits = limitsOf(limitsNow(s), nowMs, s.fiveHour.samples)
   const tasks = tasksOf(s.tasks, (s.pet?.runningTurns.size ?? 0) > 0)
+  // The five-hour window's reset, for the session's bar: from the limits on
+  // show, the endpoint's or this session's own last response's.
+  const fiveHourReset = limitsNow(s).find(limit => limit.kind === 'five_hour')?.resetsAt ?? s.fiveHour.resetsAt
   const facts: SessionFacts = {
     startedAt: s.usage?.startedAt ?? nowMs,
     turns: s.turns,
@@ -420,7 +458,7 @@ function stats(
     agents: s.agents,
     background: s.background,
     wakeups: s.wakeups,
-    ...(s.fiveHour.resetsAt === undefined ? {} : { fiveHourReset: s.fiveHour.resetsAt }),
+    ...(fiveHourReset === undefined ? {} : { fiveHourReset }),
   }
   const session = tasks ? null : sessionOf(facts, nowMs)
   const compact = compactButton(el, s, onCompact)
@@ -448,7 +486,7 @@ function stats(
         ? row('limits', 'Limits', limits.percent, limits.isRunningOut ? 'error' : fillColor(limits.percent), limits.text)
         : null}
       {tasks ? row('tasks', 'Tasks', tasks.percent, 'suggestion', tasks.text) : null}
-      {session ? row('session', 'Session', session.percent ?? 0, session.percent === null ? null : 'subtle', session.text) : null}
+      {session ? row('session', 'Session', session.percent ?? 0, session.percent === null ? null : 'suggestion', session.text) : null}
     </Box>
   )
 }
@@ -596,17 +634,12 @@ function start($: EngineInterface, s: Ranko) {
     })
     $.clock.every(STATS_EVERY_MS, () => {
       if (s.isOn('stats') && s.isShown) {
-        void readUsage($, s).then(() => host.invalidate())
-      }
-    })
-    $.clock.every(PLAN_EVERY_MS, () => {
-      if (s.isOn('stats') && s.isShown) {
-        void Promise.all([readPlan($, s), readAutoCompact($, s)]).then(() => host.invalidate())
+        void readStats($, s).then(() => host.invalidate())
       }
     })
     if (s.isOn('stats')) {
       await readUsage($, s)
-      void Promise.all([readPlan($, s), readAutoCompact($, s), countTurns($, s)]).then(() => host.invalidate())
+      void Promise.all([readStats($, s), countTurns($, s)]).then(() => host.invalidate())
     }
   })()
   return s.starting
@@ -674,6 +707,9 @@ export function register(on: On, options: PluginOptions) {
     compactLogs: 0,
     autoCompactAt: null,
     fiveHour: { samples: [] },
+    planAskedAt: null,
+    planMisses: 0,
+    autoCompactReadAt: null,
     tasks: [],
     turns: 0,
     turn: null,
