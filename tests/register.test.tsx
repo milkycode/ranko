@@ -111,6 +111,32 @@ async function shownClip(band: Band) {
   return (pet?.props.source as { file: string } | undefined)?.file.match(/frames\/([\w-]+)\//)?.[1]
 }
 
+type AnyBand = Band | DesktopBand
+
+/**
+ * Whether the band's button keyed `key` stands out: a Button's variant in the
+ * terminal, the desktop's press Client's `isPrimary`; undefined with none.
+ */
+async function isPrimary(band: AnyBand, key: string) {
+  const found = await band.find({ key })
+  if (!found) {
+    return undefined
+  }
+  return found.type === 'Client'
+    ? (found.props.props as { isPrimary: boolean }).isPrimary
+    : found.props.variant === 'primary'
+}
+
+/** Presses the band's button keyed `key`: a click on the desktop's Client, a press of the terminal's Button. */
+async function pressButton(band: AnyBand, key: string) {
+  if ((await band.find({ key }))?.type === 'Client') {
+    await band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: key })
+    await band.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: key })
+  } else {
+    await band.press({ key })
+  }
+}
+
 /** The props of the Svg the desktop draws in the Box keyed `key`. */
 async function svgIn(band: DesktopBand, key: string) {
   const box = await band.find({ key })
@@ -579,7 +605,7 @@ describe('register', () => {
       expect(await band.find({ type: 'Text', text: '████░░░░░░' })).toBeDefined()
       expect(await shownLimits(band)).toBe('5h 68% 7d 62%')
       expect(await band.find({ type: 'Text', text: '███████░░░' })).toBeDefined()
-      expect((await band.find({ key: 'compact' }))?.props.variant).toBe('secondary')
+      expect(await isPrimary(band, 'compact')).toBe(false)
       await band.unmount()
     }
 
@@ -594,11 +620,16 @@ describe('register', () => {
     expect(await band.find({ type: 'Text', text: '60m left · 90% read' })).toBeDefined()
     expect(await band.find({ type: 'Text', text: '██████████' })).toBeDefined()
     expect(await shownLimits(band)).toBe('5h 23% 7d 41%')
-    await clock.advance(60_000)
-    await band.redraw()
-    expect(await shownLimits(band)).toBe('5h 68% 7d 62%')
-    expect(await band.find({ type: 'Text', text: '59m left · 90% read' })).toBeDefined()
     await band.unmount()
+
+    // A minute on, the endpoint is asked again. (No band is drawn meanwhile:
+    // a minute of the desktop's redraws is long for the kit.)
+    await clock.advance(60_000)
+    const later = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    await later.redraw()
+    expect(await shownLimits(later)).toBe('5h 68% 7d 62%')
+    expect(await later.find({ type: 'Text', text: '59m left · 90% read' })).toBeDefined()
+    await later.unmount()
   })
 
   test('the context row says how far auto-compaction is; Compact stands out in its last tenth', async ($, on) => {
@@ -607,7 +638,7 @@ describe('register', () => {
     const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
     await band.redraw()
     expect(await band.find({ type: 'Text', text: '76% · 152k / 200k · auto-compact in 15k' })).toBeDefined()
-    expect((await band.find({ key: 'compact' }))?.props.variant).toBe('primary')
+    expect(await isPrimary(band, 'compact')).toBe(true)
     await band.unmount()
   })
 
@@ -666,7 +697,7 @@ describe('register', () => {
       expect(await band.find({ key: 'ranko' })).toBeDefined()
       // The fold button stands at the band's top right, clear of Ranko.
       expect((await band.find({ key: 'fold' }))?.props.left).toBe(95)
-      await band.press({ key: 'collapse' })
+      await pressButton(band, 'collapse')
       expect(stored.collapsed).toBe(true)
       expect(await band.find({ key: 'ranko' })).toBeUndefined()
       expect(await band.find({ key: 'stats' })).toBeUndefined()
@@ -676,7 +707,7 @@ describe('register', () => {
       expect(await band.find({ type: 'Text', text: '–' })).toBeDefined()
       expect(await band.find({ key: 'compact' })).toBeDefined()
 
-      await band.press({ key: 'expand' })
+      await pressButton(band, 'expand')
       expect(stored.collapsed).toBe(false)
       expect(await band.find({ key: 'ranko' })).toBeDefined()
       expect(await band.find({ key: 'stats-line' })).toBeUndefined()
@@ -741,8 +772,8 @@ describe('register', () => {
     await $.session.start(START)
     const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
 
-    expect((await band.find({ key: 'compact' }))?.props.variant).toBe('primary')
-    await band.press({ key: 'compact' })
+    expect(await isPrimary(band, 'compact')).toBe(true)
+    await pressButton(band, 'compact')
     expect(logs[0]).toBe('Compacted from 170k to 12k tokens. The summary Claude carries on with:')
     const lines = logs.slice(1)
     expect(lines.length).toBe(2)

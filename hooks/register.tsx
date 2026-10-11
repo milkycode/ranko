@@ -14,6 +14,7 @@ import type {
 } from 'claude-code'
 
 import type { GrabMessage, GrabProps } from './grab'
+import type { PressMessage, PressProps } from './press'
 import { FEATURES, LEAVE_FRAMES, PROP_FOR_TOOL, Pet, isManifest, moodOf, sizeFor } from './pet'
 import type { Feature, Manifest, Mini } from './pet'
 import {
@@ -134,7 +135,9 @@ type Ranko = {
   isCollapsed: boolean
 }
 
-type StatsElements = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
+// The elements the stats draw with, and whether the surface is the desktop,
+// where the band's buttons are Clients (press.tsx).
+type StatsElements = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Client'> & { isDesktop: boolean }
 
 const KEY = 'ranko'
 // A turn shorter than this ends without a celebration: quick answers would
@@ -466,32 +469,39 @@ async function collapse($: EngineInterface, s: Ranko, isCollapsed: boolean) {
 }
 
 /**
+ * A button of the band: a Button in the terminal. On the desktop, which draws
+ * the band again for every frame of Ranko, a Button drawn anew between press
+ * and release loses the click, so there it is a Client (press.tsx), kept
+ * across the redraws; its press reaches the `ui.message` hook on its key.
+ */
+function pressable(el: StatsElements, key: string, label: string, isPrimary: boolean, onPress: () => void) {
+  const { Button, Client } = el
+  if (el.isDesktop) {
+    const props: PressProps = { label, isPrimary }
+    return <Client key={key} module="./press.tsx" props={props} />
+  }
+  return <Button key={key} label={label} variant={isPrimary ? 'primary' : 'secondary'} onPress={onPress} />
+}
+
+/**
  * The Compact button, once there is something to compact: it stands out once
  * the context is nearly full. Null before.
  */
 function compactButton(el: StatsElements, s: Ranko, onCompact: () => void) {
-  const { Button } = el
   const context = contextOf(s.usage, s.autoCompactAt)
   if (!s.isCompacting && (context?.percent ?? 0) < COMPACT_FROM) {
     return null
   }
-  return (
-    <Button
-      key="compact"
-      label={s.isCompacting ? 'Compacting…' : 'Compact'}
-      variant={context && isNearlyFull(context, s.autoCompactAt) ? 'primary' : 'secondary'}
-      onPress={onCompact}
-    />
-  )
+  const isPrimary = context !== null && isNearlyFull(context, s.autoCompactAt)
+  return pressable(el, 'compact', s.isCompacting ? 'Compacting…' : 'Compact', isPrimary, onCompact)
 }
 
 /** The button at the band's top right that folds it, or opens it again. */
 function foldButton(el: StatsElements, isCollapsed: boolean, onPress: () => void) {
-  const { Button } = el
-  return (
-    <Button key={isCollapsed ? 'expand' : 'collapse'} label={isCollapsed ? EXPAND_MARK : COLLAPSE_MARK} onPress={onPress} />
-  )
+  return pressable(el, isCollapsed ? 'expand' : 'collapse', isCollapsed ? EXPAND_MARK : COLLAPSE_MARK, false, onPress)
 }
+
+const isPress = (data: unknown) => (data as PressMessage | null)?.isPressed === true
 
 /**
  * The folded band, one line across it: the context as a bar, the cache's time
@@ -882,6 +892,28 @@ export function register(on: On, options: PluginOptions) {
     return result
   })
 
+  // The desktop band's buttons (press.tsx) post their presses.
+  on('ui.message', { element: 'compact' }, async ($, e, next) => {
+    if (isPress(e.data)) {
+      void compactNow($, s)
+    }
+    return next(e)
+  })
+
+  on('ui.message', { element: 'collapse' }, async ($, e, next) => {
+    if (isPress(e.data)) {
+      await collapse($, s, true)
+    }
+    return next(e)
+  })
+
+  on('ui.message', { element: 'expand' }, async ($, e, next) => {
+    if (isPress(e.data)) {
+      await collapse($, s, false)
+    }
+    return next(e)
+  })
+
   on('ui.message', { element: 'grab' }, async ($, e, next) => {
     const message = e.data as GrabMessage
     const { pet, manifest } = s
@@ -941,12 +973,12 @@ export function register(on: On, options: PluginOptions) {
       }
       s.isOnDesktop = false
       s.requestId = null
-      const { Box, Button, Text } = $.ui.resolve(e)
+      const { Box, Button, Client, Text } = $.ui.resolve(e)
       return (
         <Box flexDirection="column">
           {below}
           {statsLine(
-            { Box, Text, Button },
+            { Box, Text, Button, Client, isDesktop: e.surface === 'desktop' },
             s,
             await $.clock.now(),
             e.props.bodyColumns,
@@ -1026,12 +1058,19 @@ export function register(on: On, options: PluginOptions) {
             {/* Over the grab strip, so the Compact button gets its presses. */}
             {place ? (
               <Box key="stats" position="absolute" left={place.left} top={0}>
-                {stats({ Box, Text, Button }, s, await $.clock.now(), place.width, size.rows, () => void compactNow($, s))}
+                {stats(
+                  { Box, Text, Button, Client, isDesktop: true },
+                  s,
+                  await $.clock.now(),
+                  place.width,
+                  size.rows,
+                  () => void compactNow($, s),
+                )}
               </Box>
             ) : null}
             {hasFold ? (
               <Box key="fold" position="absolute" left={s.bandColumns + 1} top={0}>
-                {foldButton({ Box, Text, Button }, false, () => void collapse($, s, true))}
+                {foldButton({ Box, Text, Button, Client, isDesktop: true }, false, () => void collapse($, s, true))}
               </Box>
             ) : null}
           </Box>
@@ -1122,12 +1161,19 @@ export function register(on: On, options: PluginOptions) {
           ) : null}
           {place ? (
             <Box key="stats" position="absolute" left={place.left} top={0}>
-              {stats({ Box, Text, Button }, s, await $.clock.now(), place.width, rows, () => void compactNow($, s))}
+              {stats(
+                { Box, Text, Button, Client, isDesktop: false },
+                s,
+                await $.clock.now(),
+                place.width,
+                rows,
+                () => void compactNow($, s),
+              )}
             </Box>
           ) : null}
           {hasFold ? (
             <Box key="fold" position="absolute" left={s.bandColumns + 1} top={0}>
-              {foldButton({ Box, Text, Button }, false, () => void collapse($, s, true))}
+              {foldButton({ Box, Text, Button, Client, isDesktop: false }, false, () => void collapse($, s, true))}
             </Box>
           ) : null}
         </Box>
