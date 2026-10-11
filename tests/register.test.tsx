@@ -65,6 +65,8 @@ function answerTheWorld(
   manifest = MANIFEST,
   rateLimits: SessionRateLimit[] = [],
   autoCompactThreshold?: number,
+  // What the plugin's store holds, read and written by it.
+  stored: Record<string, unknown> = {},
 ) {
   const clock = mock.clock(on)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -72,8 +74,11 @@ function answerTheWorld(
   // desktop drew.
   on('fs.read', ($, e) => ({ value: e.as === 'bytes' ? { base64: btoa(e.path) } : manifest }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
-  on('store.get', () => ({ value: undefined }))
-  on('store.set', () => ({ value: undefined }))
+  on('store.get', ($, e) => ({ value: stored[e.key] }))
+  on('store.set', ($, e) => {
+    stored[e.key] = e.value
+    return { value: undefined }
+  })
   on('ui.blit', () => ({ value: {} }))
   on('ui.render', () => h(Fragment, null) as RenderElement)
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -318,8 +323,9 @@ describe('register', () => {
     const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
     const petLeft = async () => (await band.find({ key: 'pet' }))?.props.left
 
-    // 100 columns wide, a 12-column pet: it starts at the right end.
-    expect(await petLeft()).toBe(88)
+    // 100 columns wide, less the 6 the fold button takes, a 12-column pet:
+    // it starts at the right end.
+    expect(await petLeft()).toBe(82)
 
     // Take hold 4 columns into the pet and carry it 30 columns left. The
     // grab region stays where the press was until the release, so the
@@ -327,10 +333,10 @@ describe('register', () => {
     await band.pointer({ type: 'down', x: 4, y: 2, button: 'left', in: 'grab' })
     await band.pointer({ type: 'move', x: -26, y: 2, button: 'left', in: 'grab' })
     expect(await shownClip(band)).toBe('held')
-    expect(await petLeft()).toBe(58)
-    expect(((await band.find({ key: 'grab' }))?.props.props as { left: number } | undefined)?.left).toBe(88)
+    expect(await petLeft()).toBe(52)
+    expect(((await band.find({ key: 'grab' }))?.props.props as { left: number } | undefined)?.left).toBe(82)
     await band.pointer({ type: 'up', x: -26, y: 2, button: 'left', in: 'grab' })
-    expect(await petLeft()).toBe(58)
+    expect(await petLeft()).toBe(52)
     expect(await shownClip(band)).toBe('drop')
 
     // A drag past the edge stops at the band's left end.
@@ -350,7 +356,7 @@ describe('register', () => {
     await band.pointer({ type: 'down', x: 8, y: 3, button: 'left', in: 'grab' })
     await band.pointer({ type: 'up', x: 8, y: 3, button: 'left', in: 'grab' })
     expect(await shownClip(band)).toBe('pat')
-    expect((await band.find({ key: 'pet' }))?.props.left).toBe(88)
+    expect((await band.find({ key: 'pet' }))?.props.left).toBe(82)
     await band.unmount()
   })
 
@@ -381,19 +387,19 @@ describe('register', () => {
     const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
     const petLeft = async () => (await band.find({ key: 'ranko' }))?.props.left
 
-    // The grab region is a strip along the whole band. 100 columns wide, a
-    // 10-column pet: he starts at the right end.
-    expect(await petLeft()).toBe(90)
+    // The grab region is a strip along the band. 100 columns wide, less the 6
+    // the fold button takes, a 10-column pet: he starts at the right end.
+    expect(await petLeft()).toBe(84)
 
     // Take hold 3 columns into him and carry him 30 columns left. The
     // desktop shows nothing new in the band while the button is down, so the
     // strip draws a frame where he will land.
     await band.pointer({ type: 'down', x: 93, y: 2, button: 'left', in: 'grab' })
     await band.pointer({ type: 'move', x: 63, y: 2, button: 'left', in: 'grab' })
-    expect((await band.find({ key: 'landing', in: 'grab' }))?.props.left).toBe(60)
+    expect((await band.find({ key: 'landing', in: 'grab' }))?.props.left).toBe(54)
     await band.pointer({ type: 'up', x: 63, y: 2, button: 'left', in: 'grab' })
     expect(await band.find({ key: 'landing', in: 'grab' })).toBeUndefined()
-    expect(await petLeft()).toBe(60)
+    expect(await petLeft()).toBe(54)
     expect(await desktopFile(band)).toMatch(/drop\/\d{3}\.png$/)
     await band.unmount()
   })
@@ -407,12 +413,12 @@ describe('register', () => {
     await band.pointer({ type: 'move', x: 40, y: 1, button: 'left', in: 'grab' })
     await band.pointer({ type: 'up', x: 40, y: 1, button: 'left', in: 'grab' })
     expect(await desktopFile(band)).toMatch(/idle\/\d{3}\.png$/)
-    expect((await band.find({ key: 'ranko' }))?.props.left).toBe(90)
+    expect((await band.find({ key: 'ranko' }))?.props.left).toBe(84)
 
-    await band.pointer({ type: 'down', x: 95, y: 1, button: 'left', in: 'grab' })
-    await band.pointer({ type: 'up', x: 95, y: 1, button: 'left', in: 'grab' })
+    await band.pointer({ type: 'down', x: 89, y: 1, button: 'left', in: 'grab' })
+    await band.pointer({ type: 'up', x: 89, y: 1, button: 'left', in: 'grab' })
     expect(await desktopFile(band)).toMatch(/pat\/\d{3}\.png$/)
-    expect((await band.find({ key: 'ranko' }))?.props.left).toBe(90)
+    expect((await band.find({ key: 'ranko' }))?.props.left).toBe(84)
     await band.unmount()
   })
 
@@ -425,7 +431,7 @@ describe('register', () => {
     await band.pointer({ type: 'move', x: 63, y: 2, button: 'left', in: 'grab' })
     expect(await band.find({ key: 'landing', in: 'grab' })).toBeUndefined()
     await band.pointer({ type: 'up', x: 63, y: 2, button: 'left', in: 'grab' })
-    expect((await band.find({ key: 'ranko' }))?.props.left).toBe(90)
+    expect((await band.find({ key: 'ranko' }))?.props.left).toBe(84)
     await band.unmount()
   })
 
@@ -647,6 +653,53 @@ describe('register', () => {
     await band.redraw()
     expect(await band.find({ key: 'session' })).toBeDefined()
     expect(await band.find({ type: 'Text', text: /· 1 turn · 1 agent \(Explore\) · 1 shell · 1 loop · last 9s, 1 tool$/ })).toBeDefined()
+    await band.unmount()
+  })
+
+  test('the band folds to one line of figures without Ranko, and opens again, on both surfaces', async ($, on) => {
+    const stored: Record<string, unknown> = {}
+    answerTheWorld(on, 42, MANIFEST, [], undefined, stored)
+    await $.session.start(START)
+
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      expect(await band.find({ key: 'ranko' })).toBeDefined()
+      // The fold button stands at the band's top right, clear of Ranko.
+      expect((await band.find({ key: 'fold' }))?.props.left).toBe(95)
+      await band.press({ key: 'collapse' })
+      expect(stored.collapsed).toBe(true)
+      expect(await band.find({ key: 'ranko' })).toBeUndefined()
+      expect(await band.find({ key: 'stats' })).toBeUndefined()
+      expect(await band.find({ key: 'stats-line' })).toBeDefined()
+      expect(await band.find({ type: 'Text', text: '████░░░░░░' })).toBeDefined()
+      expect(await band.find({ type: 'Text', text: '42%' })).toBeDefined()
+      expect(await band.find({ type: 'Text', text: '–' })).toBeDefined()
+      expect(await band.find({ key: 'compact' })).toBeDefined()
+
+      await band.press({ key: 'expand' })
+      expect(stored.collapsed).toBe(false)
+      expect(await band.find({ key: 'ranko' })).toBeDefined()
+      expect(await band.find({ key: 'stats-line' })).toBeUndefined()
+      await band.unmount()
+    }
+
+    // /ranko collapse and expand do the same.
+    expect((await $.command.run({ ...COMMAND, command: 'ranko', args: 'collapse' })).text).toContain('one line')
+    const folded = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await folded.find({ key: 'stats-line' })).toBeDefined()
+    await folded.unmount()
+    await $.command.run({ ...COMMAND, command: 'ranko', args: 'expand' })
+    const open = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect(await open.find({ key: 'ranko' })).toBeDefined()
+    await open.unmount()
+  })
+
+  test('folded in an earlier session, the band starts folded', async ($, on) => {
+    answerTheWorld(on, 10, MANIFEST, [], undefined, { collapsed: true })
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect(await band.find({ key: 'stats-line' })).toBeDefined()
+    expect(await band.find({ key: 'ranko' })).toBeUndefined()
     await band.unmount()
   })
 
@@ -872,7 +925,7 @@ describe('register', () => {
     await band.pointer({ type: 'move', x: -26, y: 2, button: 'left', in: 'grab' })
     expect(await shownClip(band)).toBe('held')
     await band.pointer({ type: 'up', x: -26, y: 2, button: 'left', in: 'grab' })
-    expect((await band.find({ key: 'pet' }))?.props.left).toBe(58)
+    expect((await band.find({ key: 'pet' }))?.props.left).toBe(52)
     await band.unmount()
   })
 

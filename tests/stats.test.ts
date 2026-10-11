@@ -37,10 +37,10 @@ describe('stats', () => {
 
   test('the cache is warm for its stretch after a request, its bar running down, then expired', () => {
     const reading = { at: 0, input: 100, read: 9000, written: 900 }
-    expect(cacheOf(null, 300_000, 0)).toEqual({ percent: 0, text: 'no request yet' })
-    expect(cacheOf(reading, 300_000, 60_000)).toEqual({ percent: 80, text: '4m left · 90% read' })
-    expect(cacheOf(reading, 300_000, 270_000)).toEqual({ percent: 10, text: '<1m left · 90% read' })
-    expect(cacheOf(reading, 300_000, 420_000)).toEqual({ percent: 0, text: 'expired 2m ago' })
+    expect(cacheOf(null, 300_000, 0)).toEqual({ percent: 0, text: 'no request yet', short: '–' })
+    expect(cacheOf(reading, 300_000, 60_000)).toEqual({ percent: 80, text: '4m left · 90% read', short: '4m' })
+    expect(cacheOf(reading, 300_000, 270_000)).toEqual({ percent: 10, text: '<1m left · 90% read', short: '<1m' })
+    expect(cacheOf(reading, 300_000, 420_000)).toEqual({ percent: 0, text: 'expired 2m ago', short: 'expired' })
   })
 
   test('bars turn yellow, then red: a used-up share as it fills, the cache as its time runs out', () => {
@@ -54,6 +54,7 @@ describe('stats', () => {
       percent: 7.5,
       isRunningOut: false,
       text: 'spend 8%',
+      short: 'spend 8%',
     })
 
     const fiveHours = '2030-01-07T17:40:00Z'
@@ -66,6 +67,7 @@ describe('stats', () => {
     const shown = limitsOf(limits, Date.parse(fiveHours) - 2 * HOUR)
     expect(shown?.percent).toBe(23)
     expect(shown?.isRunningOut).toBe(false)
+    expect(shown?.short).toBe('7d 41% · 5h 23%')
     expect(shown?.text).toMatch(/^7d 41% ↻ \w{3} \d\d:\d\d \(full ≈ \w{3} \d\d:\d\d\) · 5h 23% ↻ \d\d:\d\d \(lasts\)$/)
   })
 

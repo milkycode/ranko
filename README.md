@@ -69,6 +69,10 @@ claude --plugin-dir path/to/ranko
 - `/ranko` hides or shows him.
 - `/ranko <reaction>` plays one of his reactions, e.g. `/ranko hello`.
 - `/ranko list` shows every reaction, and every switch with its state.
+- `/ranko collapse` folds the band to one line of figures and the Compact
+  button, without Ranko, as the ▴ button at the band's top right does;
+  `/ranko expand` or the ▾ at the line's right end opens it again. The band
+  stays as you left it in later sessions.
 - `/ranko on <switch>` / `/ranko off <switch>` flips a switch: `drag`,
   `pats`, `toolProps`, `miniRankos`, `stuffing`, `blush`, `fidgets`, `sounds`,
   `stats`, `compactSummary`.

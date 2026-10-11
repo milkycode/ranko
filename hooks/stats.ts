@@ -108,19 +108,19 @@ export function contextOf(usage: SessionUsage | null, autoCompactAt: number | nu
 /**
  * The cache: the share of its time left, for the bar, and how much longer it
  * stays warm with how much of the last request it served, or how long ago it
- * lapsed.
+ * lapsed; `short` is the time left alone, for the collapsed line.
  */
 export function cacheOf(reading: CacheReading | null, ttlMs: number, nowMs: number) {
   if (!reading) {
-    return { percent: 0, text: 'no request yet' }
+    return { percent: 0, text: 'no request yet', short: '–' }
   }
   const left = reading.at + ttlMs - nowMs
   if (left <= 0) {
-    return { percent: 0, text: `expired ${span(-left)} ago` }
+    return { percent: 0, text: `expired ${span(-left)} ago`, short: 'expired' }
   }
   const total = reading.input + reading.read + reading.written
   const hit = total > 0 ? ` · ${Math.round((reading.read / total) * 100)}% read` : ''
-  return { percent: Math.min(100, (left / ttlMs) * 100), text: `${span(left)} left${hit}` }
+  return { percent: Math.min(100, (left / ttlMs) * 100), text: `${span(left)} left${hit}`, short: span(left) }
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -182,7 +182,8 @@ export function fullAt(limit: SessionRateLimit, nowMs: number, samples: readonly
  * The plan's usage limits, `5h 68% ↻ 17:40 (full ≈ 16:10) · 7d 41% ↻ Mon
  * 09:00 (lasts)`, the session window's share for the bar (the five hours, or
  * the first limit there is), and whether that window runs full before it
- * resets; null with none. `samples` are the five-hour window's readings.
+ * resets; `short` is the shares alone, `5h 68% · 7d 41%`, for the collapsed
+ * line; null with none. `samples` are the five-hour window's readings.
  */
 export function limitsOf(limits: readonly SessionRateLimit[], nowMs: number, samples: readonly LimitSample[] = []) {
   const names: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
@@ -203,7 +204,8 @@ export function limitsOf(limits: readonly SessionRateLimit[], nowMs: number, sam
       return `${names[limit.kind] ?? limit.kind} ${Math.round(limit.percentUsed)}%${resets}${forecast}`
     })
     .join(' · ')
-  return { percent: session.percentUsed, isRunningOut, text }
+  const short = limits.map(limit => `${names[limit.kind] ?? limit.kind} ${Math.round(limit.percentUsed)}%`).join(' · ')
+  return { percent: session.percentUsed, isRunningOut, text, short }
 }
 
 /**

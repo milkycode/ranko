@@ -56,7 +56,8 @@ import type { CacheReading, LimitSample, SessionFacts, Task } from './stats'
  * Beside him the band shows how full the context is, how long the prompt
  * cache stays warm and the plan's usage limits, with a Compact button
  * (stats.ts); after a compaction the transcript shows the summary Claude
- * carries on with, in log lines the model doesn't read.
+ * carries on with, in log lines the model doesn't read. The band collapses to
+ * one line of the figures alone, without him.
  */
 
 type Host = {
@@ -129,6 +130,8 @@ type Ranko = {
   agents: string[]
   background: { type: string }[]
   wakeups: { schedule: string; recurring: boolean }[]
+  // The band folded to one line of the figures, Ranko not drawn; kept.
+  isCollapsed: boolean
 }
 
 type StatsElements = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
@@ -162,6 +165,11 @@ const STATS_MIN_COLUMNS = 34
 const STATS_MAX_COLUMNS = 84
 const STATS_GAP = 2
 const STATS_LABEL_COLUMNS = 8
+// The buttons that fold the band to one line and open it again, at its
+// top right; Ranko keeps clear of the columns the fold takes there.
+const COLLAPSE_MARK = '▴'
+const EXPAND_MARK = '▾'
+const FOLD_COLUMNS = 6
 // How often the stats read the session again, and ask the usage endpoint for
 // the plan's limits, which other sessions use up too.
 const STATS_EVERY_MS = 10_000
@@ -384,13 +392,19 @@ async function compactNow($: EngineInterface, s: Ranko) {
 /**
  * The stats beside Ranko, the same on every surface: a row each for the
  * context, the cache, the limits and Claude's task list while there is one,
- * else the session, a dim label, a bar and the reading. The context's row ends in the Compact
- * button once there is something to compact, and it stands out once the
- * context is nearly full; the limits' bar turns red when the five-hour window
- * would run full before it resets.
+ * else the session, a dim label, a bar and the reading. The context's row
+ * ends in the Compact button. The limits' bar turns red when the five-hour
+ * window would run full before it resets.
  */
-function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: number, onCompact: () => void) {
-  const { Box, Text, Button } = el
+function stats(
+  el: StatsElements,
+  s: Ranko,
+  nowMs: number,
+  width: number,
+  rows: number,
+  onCompact: () => void,
+) {
+  const { Box, Text } = el
   const context = contextOf(s.usage, s.autoCompactAt)
   const cache = cacheOf(s.cache, cacheTtl(s.isPlan), nowMs)
   const limits = limitsOf(limitsNow(s), nowMs, s.fiveHour.samples)
@@ -406,7 +420,7 @@ function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: 
     ...(s.fiveHour.resetsAt === undefined ? {} : { fiveHourReset: s.fiveHour.resetsAt }),
   }
   const session = tasks ? null : sessionOf(facts, nowMs)
-  const isCompactable = s.isCompacting || (context?.percent ?? 0) >= COMPACT_FROM
+  const compact = compactButton(el, s, onCompact)
   // A dim label, a bar in the reading's color (or dim, empty, with none), the
   // reading, and what else the row holds.
   const row = (key: string, label: string, percent: number, barColor: string | null, text: string, end?: RenderElement) => (
@@ -421,25 +435,92 @@ function stats(el: StatsElements, s: Ranko, nowMs: number, width: number, rows: 
       </Box>
     </Box>
   )
-  const compact = isCompactable ? (
-    <Button
-      key="compact"
-      label={s.isCompacting ? 'Compacting…' : 'Compact'}
-      variant={context && isNearlyFull(context, s.autoCompactAt) ? 'primary' : 'secondary'}
-      onPress={onCompact}
-    />
-  ) : undefined
   return (
     <Box flexDirection="column" width={width} height={rows} overflow="hidden">
       {context
-        ? row('context', 'Context', context.percent, fillColor(context.percent), context.text, compact)
-        : row('context', 'Context', 0, null, 'no reading yet', compact)}
+        ? row('context', 'Context', context.percent, fillColor(context.percent), context.text, compact ?? undefined)
+        : row('context', 'Context', 0, null, 'no reading yet', compact ?? undefined)}
       {row('cache', 'Cache', cache.percent, cache.percent > 0 ? cacheColor(cache.percent) : null, cache.text)}
       {limits
         ? row('limits', 'Limits', limits.percent, limits.isRunningOut ? 'error' : fillColor(limits.percent), limits.text)
         : null}
       {tasks ? row('tasks', 'Tasks', tasks.percent, 'suggestion', tasks.text) : null}
       {session ? row('session', 'Session', session.percent ?? 0, session.percent === null ? null : 'subtle', session.text) : null}
+    </Box>
+  )
+}
+
+/**
+ * Folds the band to one line of the figures, or opens it again, and keeps
+ * that for later sessions. Folded, Ranko isn't drawn, so his ticks stop
+ * blitting and redrawing until a full band draws him again.
+ */
+async function collapse($: EngineInterface, s: Ranko, isCollapsed: boolean) {
+  s.isCollapsed = isCollapsed
+  if (isCollapsed) {
+    s.isOnDesktop = false
+    s.requestId = null
+  }
+  $.ui.invalidate('ui.render')
+  await $.store.set('collapsed', isCollapsed).catch(() => undefined)
+}
+
+/**
+ * The Compact button, once there is something to compact: it stands out once
+ * the context is nearly full. Null before.
+ */
+function compactButton(el: StatsElements, s: Ranko, onCompact: () => void) {
+  const { Button } = el
+  const context = contextOf(s.usage, s.autoCompactAt)
+  if (!s.isCompacting && (context?.percent ?? 0) < COMPACT_FROM) {
+    return null
+  }
+  return (
+    <Button
+      key="compact"
+      label={s.isCompacting ? 'Compacting…' : 'Compact'}
+      variant={context && isNearlyFull(context, s.autoCompactAt) ? 'primary' : 'secondary'}
+      onPress={onCompact}
+    />
+  )
+}
+
+/** The button at the band's top right that folds it, or opens it again. */
+function foldButton(el: StatsElements, isCollapsed: boolean, onPress: () => void) {
+  const { Button } = el
+  return (
+    <Button key={isCollapsed ? 'expand' : 'collapse'} label={isCollapsed ? EXPAND_MARK : COLLAPSE_MARK} onPress={onPress} />
+  )
+}
+
+/**
+ * The folded band, one line across it: the context as a bar, the cache's time
+ * left and the limits' shares as figures, colored as the full rows color
+ * them, the Compact button, and at the right end the button that opens the
+ * band again.
+ */
+function statsLine(el: StatsElements, s: Ranko, nowMs: number, width: number, onCompact: () => void, onExpand: () => void) {
+  const { Box, Text } = el
+  const context = contextOf(s.usage, s.autoCompactAt)
+  const cache = cacheOf(s.cache, cacheTtl(s.isPlan), nowMs)
+  const limits = limitsOf(limitsNow(s), nowMs, s.fiveHour.samples)
+  return (
+    <Box key="stats-line" flexDirection="row" justifyContent="space-between" width={width}>
+      <Box flexDirection="row" gap={1}>
+        <Text dimColor>Context</Text>
+        {context ? <Text color={fillColor(context.percent)}>{bar(context.percent)}</Text> : <Text dimColor>{bar(0)}</Text>}
+        <Text>{context ? `${context.percent}%` : '–'}</Text>
+        <Text dimColor>· Cache</Text>
+        {cache.percent > 0 ? <Text color={cacheColor(cache.percent)}>{cache.short}</Text> : <Text dimColor>{cache.short}</Text>}
+        {limits ? <Text dimColor>· Limits</Text> : null}
+        {limits ? (
+          <Text color={limits.isRunningOut ? 'error' : fillColor(limits.percent)} wrap="truncate">
+            {limits.short}
+          </Text>
+        ) : null}
+        {compactButton(el, s, onCompact)}
+      </Box>
+      {foldButton(el, true, onExpand)}
     </Box>
   )
 }
@@ -490,12 +571,13 @@ function start($: EngineInterface, s: Ranko) {
 
     const saved = await $.store.get('left').catch(() => undefined)
     s.left = typeof saved === 'number' ? saved : null
+    s.isCollapsed = (await $.store.get('collapsed').catch(() => undefined)) === true
 
     await $.command
       .register({
         name: 'ranko',
         description: 'Show or hide Ranko, play one of his reactions, or turn a switch on or off',
-        argumentHint: '[happy | oops | pat | blush | sleepy | … | list | on <switch> | off <switch>]',
+        argumentHint: '[happy | oops | pat | blush | sleepy | … | list | collapse | expand | on <switch> | off <switch>]',
       })
       .catch(() => undefined)
 
@@ -589,6 +671,7 @@ export function register(on: On, options: PluginOptions) {
     agents: [],
     background: [],
     wakeups: [],
+    isCollapsed: false,
   }
 
   on('session.start', async ($, e, next) => {
@@ -605,6 +688,11 @@ export function register(on: On, options: PluginOptions) {
       s.isShown = !s.isShown
       s.host?.invalidate()
       return { text: s.isShown ? 'Ranko is back' : 'Ranko is napping out of sight' }
+    }
+
+    if (verb === 'collapse' || verb === 'expand') {
+      await collapse($, s, verb === 'collapse')
+      return { text: verb === 'collapse' ? 'The band is folded to one line' : 'Ranko and the stats are back in full' }
     }
 
     if (verb === 'list') {
@@ -845,6 +933,30 @@ export function register(on: On, options: PluginOptions) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e)
 
+    // Collapsed: one line of the figures, Ranko not drawn, on either surface.
+    if ((e.surface === 'desktop' || e.surface === 'terminal') && s.isCollapsed && s.isOn('stats')) {
+      await start($, s)
+      if (!s.isShown || e.props.hasSurvey) {
+        return below
+      }
+      s.isOnDesktop = false
+      s.requestId = null
+      const { Box, Button, Text } = $.ui.resolve(e)
+      return (
+        <Box flexDirection="column">
+          {below}
+          {statsLine(
+            { Box, Text, Button },
+            s,
+            await $.clock.now(),
+            e.props.bodyColumns,
+            () => void compactNow($, s),
+            () => void collapse($, s, false),
+          )}
+        </Box>
+      )
+    }
+
     // The desktop app: laid out in its own cells as the terminal lays out
     // its Images, each frame an SVG; the grab region is a strip along the
     // whole band, so it can show where a dragged Ranko will land.
@@ -859,7 +971,8 @@ export function register(on: On, options: PluginOptions) {
       }
       pet.sync(await $.clock.now())
 
-      s.bandColumns = e.props.bodyColumns
+      const hasFold = s.isOn('stats')
+      s.bandColumns = e.props.bodyColumns - (hasFold ? FOLD_COLUMNS : 0)
       s.petColumns = size.columns
       const petLeft = leftIn(s, s.bandColumns, size.columns)
       const mini = desktopSize(manifest, 0.5)
@@ -888,7 +1001,7 @@ export function register(on: On, options: PluginOptions) {
       return (
         <Box flexDirection="column">
           {below}
-          <Box width={s.bandColumns} height={size.rows}>
+          <Box width={e.props.bodyColumns} height={size.rows}>
             {places.map(({ mini: m, x }, i) => {
               const source = minis[i]
               return source ? (
@@ -913,9 +1026,12 @@ export function register(on: On, options: PluginOptions) {
             {/* Over the grab strip, so the Compact button gets its presses. */}
             {place ? (
               <Box key="stats" position="absolute" left={place.left} top={0}>
-                {stats({ Box, Text, Button }, s, await $.clock.now(), place.width, size.rows, () => {
-                  void compactNow($, s)
-                })}
+                {stats({ Box, Text, Button }, s, await $.clock.now(), place.width, size.rows, () => void compactNow($, s))}
+              </Box>
+            ) : null}
+            {hasFold ? (
+              <Box key="fold" position="absolute" left={s.bandColumns + 1} top={0}>
+                {foldButton({ Box, Text, Button }, false, () => void collapse($, s, true))}
               </Box>
             ) : null}
           </Box>
@@ -941,7 +1057,8 @@ export function register(on: On, options: PluginOptions) {
     }
 
     s.requestId = e.requestId
-    s.bandColumns = e.props.bodyColumns
+    const hasFold = s.isOn('stats')
+    s.bandColumns = e.props.bodyColumns - (hasFold ? FOLD_COLUMNS : 0)
     pet.sync(await $.clock.now())
 
     const { Box, Button, Image, Client, Text } = await $.ui.resolve(e)
@@ -982,7 +1099,7 @@ export function register(on: On, options: PluginOptions) {
     return (
       <Box flexDirection="column">
         {below}
-        <Box width={s.bandColumns} height={rows}>
+        <Box width={e.props.bodyColumns} height={rows}>
           {minis}
           {pet.extraMinis > 0 ? (
             <Box key="extra-minis" position="absolute" left={Math.max(0, petLeft - 4)} top={0}>
@@ -1005,9 +1122,12 @@ export function register(on: On, options: PluginOptions) {
           ) : null}
           {place ? (
             <Box key="stats" position="absolute" left={place.left} top={0}>
-              {stats({ Box, Text, Button }, s, await $.clock.now(), place.width, rows, () => {
-                void compactNow($, s)
-              })}
+              {stats({ Box, Text, Button }, s, await $.clock.now(), place.width, rows, () => void compactNow($, s))}
+            </Box>
+          ) : null}
+          {hasFold ? (
+            <Box key="fold" position="absolute" left={s.bandColumns + 1} top={0}>
+              {foldButton({ Box, Text, Button }, false, () => void collapse($, s, true))}
             </Box>
           ) : null}
         </Box>
