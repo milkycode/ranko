@@ -5,7 +5,7 @@ import type { EngineInterface, On, PluginOptions, RenderElement } from 'claude-c
 
 import type { GrabMessage, GrabProps } from './grab'
 import { FEATURES, LEAVE_FRAMES, PROP_FOR_TOOL, Pet, isManifest, moodOf, sizeFor } from './pet'
-import type { Feature, Manifest } from './pet'
+import type { Feature, Manifest, Mini } from './pet'
 
 /**
  * Ranko above the prompt: frames baked by blender/bake.py, played
@@ -18,6 +18,10 @@ import type { Feature, Manifest } from './pet'
  * terminal without an image protocol, the band is left as it was. Every
  * reaction beyond the base moods is a `userConfig` switch, on unless turned
  * off.
+ *
+ * The desktop shows nothing new in the band while a button is held, so a
+ * dragged Ranko moves there only when he is let go; until then the grab
+ * region, which it does draw, shows where he will land (grab.tsx).
  */
 
 type Host = {
@@ -74,9 +78,12 @@ const SOUNDS = new Set(['hello', 'pat', 'happy', 'oops', 'blush', 'held', 'drop'
 const SOUND_GAIN = 0.6
 // Below this many rows Ranko is too small to read and isn't drawn at all.
 const MIN_ROWS = 4
-// A terminal cell in CSS px, so that on the desktop Ranko keeps the size and
-// shape the manifest gives him in cells.
-const DESKTOP_CELL = { width: 8, height: 16 }
+// A terminal cell in CSS px: on the desktop Ranko is as big as the manifest's
+// cells would make him in a terminal, 96 px square.
+const TERMINAL_CELL_PX = { width: 8, height: 16 }
+// The desktop lays the band out in cells of its own, measured there at about
+// 10 px wide and 24 tall: 96 px of Ranko take 10 of them by 4.
+const DESKTOP_CELL_PX = { width: 10, height: 24 }
 // How many frames the desktop keeps read: a few clips' worth.
 const FRAME_CACHE = 256
 // The most an Svg's source may hold.
@@ -119,13 +126,42 @@ async function desktopFrame($: EngineInterface, s: Ranko, file: string, opacity 
   if (base64 === null || !s.manifest) {
     return null
   }
-  const width = s.manifest.columns * DESKTOP_CELL.width
-  const height = s.manifest.rows * DESKTOP_CELL.height
+  const { width, height } = desktopSize(s.manifest)
   const fade = opacity < 1 ? ` opacity="${opacity.toFixed(2)}"` : ''
   const source =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<image width="${width}" height="${height}"${fade} href="data:image/png;base64,${base64}"/></svg>`
   return source.length <= SVG_LIMIT ? source : null
+}
+
+/** Ranko's size on the desktop: in CSS px, and the desktop's cells he covers. */
+function desktopSize(manifest: Manifest, scale = 1) {
+  const width = manifest.columns * TERMINAL_CELL_PX.width * scale
+  const height = manifest.rows * TERMINAL_CELL_PX.height * scale
+  return {
+    width,
+    height,
+    columns: Math.ceil(width / DESKTOP_CELL_PX.width),
+    rows: Math.ceil(height / DESKTOP_CELL_PX.height),
+  }
+}
+
+/**
+ * Where the mini Rankos stand: to the pet's left, or to its right when
+ * there's no room; a leaving one walks off a column every other frame. Those
+ * off the band are left out.
+ */
+function miniPlaces(s: Ranko, pet: Pet, petLeft: number, columns: number, miniColumns: number) {
+  const places: { mini: Mini; x: number }[] = []
+  pet.minis.forEach((mini, i) => {
+    const slot = (i + 1) * (miniColumns + 1)
+    const home = petLeft - slot >= 0 ? petLeft - slot : petLeft + columns + 1 + i * (miniColumns + 1)
+    const x = home - (mini.leaving === null ? 0 : Math.floor(mini.leaving / 2))
+    if (x >= 0 && x + miniColumns <= s.bandColumns && (mini.leaving ?? 0) < LEAVE_FRAMES) {
+      places.push({ mini, x })
+    }
+  })
+  return places
 }
 
 /** The pet's left column in a band this wide: where it was left, or the right end. */
@@ -429,49 +465,69 @@ export function register(on: On, options: PluginOptions) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const below = await next(e)
 
-    // The desktop app: Ranko at the band's right end, the minis to his left,
-    // each frame an SVG. No dragging or patting there yet.
+    // The desktop app: laid out in its own cells as the terminal lays out
+    // its Images, each frame an SVG; the grab region is a strip along the
+    // whole band, so it can show where a dragged Ranko will land.
     if (e.surface === 'desktop') {
       await start($, s)
       const { manifest, pet } = s
-      s.isOnDesktop = s.isShown && !e.props.hasSurvey && manifest !== null && pet !== null
-      if (!s.isOnDesktop || !manifest || !pet) {
+      const size = manifest && desktopSize(manifest)
+      s.isOnDesktop =
+        s.isShown && !e.props.hasSurvey && pet !== null && size !== null && e.props.bodyColumns >= size.columns
+      if (!s.isOnDesktop || !manifest || !pet || !size) {
         return below
       }
       pet.sync(await $.clock.now())
 
+      s.bandColumns = e.props.bodyColumns
+      s.petColumns = size.columns
+      const petLeft = leftIn(s, s.bandColumns, size.columns)
+      const mini = desktopSize(manifest, 0.5)
+      const places = miniPlaces(s, pet, petLeft, size.columns, mini.columns)
       const working = pet.framesOf('working')
       const [main, ...minis] = await Promise.all([
         desktopFrame($, s, fileOf(s, pet.clip, pet.fileFrame())),
-        ...pet.minis.map(mini =>
-          desktopFrame($, s, fileOf(s, 'working', mini.frame % working), 1 - (mini.leaving ?? 0) / LEAVE_FRAMES),
+        ...places.map(({ mini: m }) =>
+          desktopFrame($, s, fileOf(s, 'working', m.frame % working), 1 - (m.leaving ?? 0) / LEAVE_FRAMES),
         ),
       ])
       if (!main) {
         return below
       }
 
-      const { Box, Svg, Text } = $.ui.resolve(e)
-      const width = manifest.columns * DESKTOP_CELL.width
-      const height = manifest.rows * DESKTOP_CELL.height
+      const { Box, Client, Svg, Text } = $.ui.resolve(e)
+      const isGrabbable = s.isOn('drag') || s.isOn('pats')
+      const grabProps: GrabProps = {
+        left: 0,
+        columns: s.bandColumns,
+        rows: size.rows,
+        pet: { left: petLeft, columns: size.columns, isDraggable: s.isOn('drag') },
+      }
       return (
         <Box flexDirection="column">
           {below}
-          <Box flexDirection="row" justifyContent="flex-end" alignItems="flex-end" gap={1}>
-            {pet.extraMinis > 0 ? <Text dimColor>+{pet.extraMinis}</Text> : null}
-            {pet.minis
-              .map((mini, i) => {
-                const source = minis[i]
-                return source ? (
-                  <Box key={`mini-${mini.id}`}>
-                    <Svg source={source} alt="A mini Ranko at work" width={width / 2} height={height / 2} />
-                  </Box>
-                ) : null
-              })
-              .reverse()}
-            <Box key={KEY}>
-              <Svg source={main} alt="Ranko" width={width} height={height} />
+          <Box width={s.bandColumns} height={size.rows}>
+            {places.map(({ mini: m, x }, i) => {
+              const source = minis[i]
+              return source ? (
+                <Box key={`mini-${m.id}`} position="absolute" left={x} top={size.rows - mini.rows}>
+                  <Svg source={source} alt="A mini Ranko at work" width={mini.width} height={mini.height} />
+                </Box>
+              ) : null
+            })}
+            {pet.extraMinis > 0 ? (
+              <Box key="extra-minis" position="absolute" left={Math.max(0, petLeft - 4)} top={0}>
+                <Text dimColor>+{pet.extraMinis}</Text>
+              </Box>
+            ) : null}
+            <Box key={KEY} position="absolute" left={petLeft} top={0}>
+              <Svg source={main} alt="Ranko" width={size.width} height={size.height} />
             </Box>
+            {isGrabbable ? (
+              <Box position="absolute" left={0} top={0}>
+                <Client key="grab" module="./grab.tsx" props={grabProps} />
+              </Box>
+            ) : null}
           </Box>
         </Box>
       )
@@ -507,32 +563,22 @@ export function register(on: On, options: PluginOptions) {
     s.sizeSuffix = rows === manifest.rows ? '' : `-${rows}`
     const petLeft = leftIn(s, s.bandColumns, columns)
 
-    // Mini Rankos stand to the pet's left, or to its right when there's no
-    // room; a leaving one walks off a column every other frame. Half the
-    // pet's height, never under two rows, in the frames' proportions.
+    // Mini Rankos are half the pet's height, never under two rows, in the
+    // frames' proportions.
     const miniRows = Math.max(2, Math.floor(rows / 2))
     const miniColumns = Math.round((manifest.columns * miniRows) / manifest.rows)
     const working = pet.framesOf('working')
-    const minis: RenderElement[] = []
-    pet.minis.forEach((mini, i) => {
-      const slot = (i + 1) * (miniColumns + 1)
-      const home = petLeft - slot >= 0 ? petLeft - slot : petLeft + columns + 1 + i * (miniColumns + 1)
-      const x = home - (mini.leaving === null ? 0 : Math.floor(mini.leaving / 2))
-      if (x < 0 || x + miniColumns > s.bandColumns || (mini.leaving ?? 0) >= LEAVE_FRAMES) {
-        return
-      }
-      minis.push(
-        <Box key={`mini-slot-${mini.id}`} position="absolute" left={x} top={rows - miniRows}>
-          <Image
-            key={`mini-${mini.id}${s.sizeSuffix}`}
-            source={{ file: fileOf(s, 'working', mini.frame % working), format: 'png' }}
-            columns={miniColumns}
-            rows={miniRows}
-            alt=" "
-          />
-        </Box>,
-      )
-    })
+    const minis: RenderElement[] = miniPlaces(s, pet, petLeft, columns, miniColumns).map(({ mini, x }) => (
+      <Box key={`mini-slot-${mini.id}`} position="absolute" left={x} top={rows - miniRows}>
+        <Image
+          key={`mini-${mini.id}${s.sizeSuffix}`}
+          source={{ file: fileOf(s, 'working', mini.frame % working), format: 'png' }}
+          columns={miniColumns}
+          rows={miniRows}
+          alt=" "
+        />
+      </Box>
+    ))
 
     const isGrabbable = s.isOn('drag') || s.isOn('pats')
     const grabLeft = s.grab?.regionLeft ?? petLeft

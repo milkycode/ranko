@@ -30,8 +30,14 @@ The mod never knows which character it plays. It reads
   drawn again for every frame, at most ten times a second. Tested on Windows
   with the app's sessions running in WSL, where a mod installed at the user
   scope loads too; only a new session picks it up. An `isInteractive` SVG
-  flipping frames by SMIL drew nothing there. Dragging and pats wait on how
-  the desktop reports the pointer to a `Client`.
+  flipping frames by SMIL drew nothing there.
+- The desktop lays the band out in cells of about 10×24 px, so 96 px of
+  Ranko cover 10 columns by 4 rows. A `Client` there gets `down`, held
+  `move`s and `up` in whole cells (no `fine`), past its edges too once
+  pressed, but the desktop shows nothing new in the band until the button
+  comes up; only the `Client`'s own drawing, clipped to its region, keeps
+  up. So the grab region is a strip along the whole band that draws a
+  dashed frame where a dragged Ranko will land.
 - The mobile app and VS Code raise no band above the prompt.
 - `$.audio.play` plays only on macOS; elsewhere Ranko is silent.
 
@@ -106,5 +112,4 @@ pictures in `previews/`, which stay out of the repo (`blender/review.py`,
 7. **Publish.** A public repo that is its own marketplace, a README with a
    demo GIF, and a link to [rankello.ai](https://rankello.ai). *Done.*
 8. **Desktop app.** Every clip, the minis and the switches drawn as SVG in
-   the desktop band. Next: dragging and pats there, once a probe shows how a
-   `Client` gets the pointer on the desktop.
+   the desktop band; dragging, with a frame where he will land, and pats.

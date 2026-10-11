@@ -350,8 +350,64 @@ describe('register', () => {
   test('drag and pats both off: no grab region at all', { options: { drag: false, pats: false } }, async ($, on) => {
     answerTheWorld(on)
     await $.session.start(START)
-    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
-    expect(await band.find({ key: 'grab' })).toBeUndefined()
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      expect(await band.find({ key: 'grab' })).toBeUndefined()
+      await band.unmount()
+    }
+  })
+
+  test('on the desktop a drag shows where he will land and puts him there on release', async ($, on) => {
+    answerTheWorld(on)
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    const petLeft = async () => (await band.find({ key: 'ranko' }))?.props.left
+
+    // The grab region is a strip along the whole band. 100 columns wide, a
+    // 10-column pet: he starts at the right end.
+    expect(await petLeft()).toBe(90)
+
+    // Take hold 3 columns into him and carry him 30 columns left. The
+    // desktop shows nothing new in the band while the button is down, so the
+    // strip draws a frame where he will land.
+    await band.pointer({ type: 'down', x: 93, y: 2, button: 'left', in: 'grab' })
+    await band.pointer({ type: 'move', x: 63, y: 2, button: 'left', in: 'grab' })
+    expect((await band.find({ key: 'landing', in: 'grab' }))?.props.left).toBe(60)
+    await band.pointer({ type: 'up', x: 63, y: 2, button: 'left', in: 'grab' })
+    expect(await band.find({ key: 'landing', in: 'grab' })).toBeUndefined()
+    expect(await petLeft()).toBe(60)
+    expect(await desktopFile(band)).toMatch(/drop\/\d{3}\.png$/)
+    await band.unmount()
+  })
+
+  test('on the desktop a click on him is a pat, a click beside him nothing', async ($, on) => {
+    answerTheWorld(on)
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+    await band.pointer({ type: 'down', x: 20, y: 1, button: 'left', in: 'grab' })
+    await band.pointer({ type: 'move', x: 40, y: 1, button: 'left', in: 'grab' })
+    await band.pointer({ type: 'up', x: 40, y: 1, button: 'left', in: 'grab' })
+    expect(await desktopFile(band)).toMatch(/idle\/\d{3}\.png$/)
+    expect((await band.find({ key: 'ranko' }))?.props.left).toBe(90)
+
+    await band.pointer({ type: 'down', x: 95, y: 1, button: 'left', in: 'grab' })
+    await band.pointer({ type: 'up', x: 95, y: 1, button: 'left', in: 'grab' })
+    expect(await desktopFile(band)).toMatch(/pat\/\d{3}\.png$/)
+    expect((await band.find({ key: 'ranko' }))?.props.left).toBe(90)
+    await band.unmount()
+  })
+
+  test('on the desktop with drag off, a held press shows no landing frame', { options: { drag: false } }, async ($, on) => {
+    answerTheWorld(on)
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+    await band.pointer({ type: 'down', x: 93, y: 2, button: 'left', in: 'grab' })
+    await band.pointer({ type: 'move', x: 63, y: 2, button: 'left', in: 'grab' })
+    expect(await band.find({ key: 'landing', in: 'grab' })).toBeUndefined()
+    await band.pointer({ type: 'up', x: 63, y: 2, button: 'left', in: 'grab' })
+    expect((await band.find({ key: 'ranko' }))?.props.left).toBe(90)
     await band.unmount()
   })
 

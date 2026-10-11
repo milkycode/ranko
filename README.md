@@ -19,9 +19,10 @@ It is a Claude Code mod: frames baked in Blender, played above the prompt.
 In a terminal they play by swapping an `Image`'s source with `$.ui.blit`,
 which needs the kitty graphics protocol (kitty, Ghostty); in other terminals
 he stays out of the way. In the Claude desktop app each frame is drawn as an
-SVG, ten a second; there he can't be dragged or patted yet. On Windows the
-desktop app is the easy way to meet him; in a terminal, run Claude Code in WSL
-inside kitty (WSLg).
+SVG, ten a second; while you drag him there, a dashed frame shows where he
+will land, and he moves when you let go. On Windows the desktop app is the
+easy way to meet him; in a terminal, run Claude Code in WSL inside kitty
+(WSLg).
 
 Meet him and Rankello at [rankello.ai](https://rankello.ai). Developed and
 maintained by [milkycode](https://www.milkycode.com).
