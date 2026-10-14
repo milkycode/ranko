@@ -736,6 +736,38 @@ describe('register', () => {
     await later.unmount()
   })
 
+  test('a lapsed cache says so in red, with the hint to compact, folded or not', async ($, on) => {
+    const clock = answerTheWorld(on, 42)
+    on('turn.step', async function* ($, e) {
+      return {
+        turnId: e.turnId,
+        index: e.index,
+        answer: '',
+        toolUses: [],
+        stopReason: 'end_turn' as const,
+        usage: { model: 'claude', input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }
+    })
+    await $.session.start(START)
+    for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude', messageCount: 1 })) {
+      // Nothing streams: the step's result is what counts.
+    }
+    // On an API key the cache lives five minutes.
+    await clock.advance(6 * 60_000)
+
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      await band.redraw()
+      const expired = await band.find({ type: 'Text', text: /^expired (<1m|\d+m) ago \(compact for fewer tokens\)$/ })
+      expect(expired?.props.color).toBe('error')
+      await pressButton(band, 'collapse')
+      const folded = await band.find({ type: 'Text', text: 'Cache expired' })
+      expect(folded?.props.color).toBe('error')
+      await pressButton(band, 'expand')
+      await band.unmount()
+    }
+  })
+
   test('the context row says how far auto-compaction is; Compact stands out in its last tenth', async ($, on) => {
     answerTheWorld(on, 76, MANIFEST, [], 167000)
     await $.session.start(START)

@@ -549,15 +549,25 @@ function stats(
   const session = tasks ? null : sessionOf(facts, nowMs)
   const compact = compactButton(el, s, onCompact)
   // A dim label, a bar in the reading's color (or dim, empty, with none), the
-  // reading, and what else the row holds.
-  const row = (key: string, label: string, percent: number, barColor: string | null, text: string, end?: RenderElement) => (
+  // reading, in a color of its own when it warns, and what else the row holds.
+  const row = (
+    key: string,
+    label: string,
+    percent: number,
+    barColor: string | null,
+    text: string,
+    end?: RenderElement,
+    textColor?: string,
+  ) => (
     <Box key={key} flexDirection="row">
       <Box width={STATS_LABEL_COLUMNS}>
         <Text dimColor>{label}</Text>
       </Box>
       <Box flexDirection="row" gap={1}>
         {barColor ? <Text color={barColor}>{bar(percent)}</Text> : <Text dimColor>{bar(0)}</Text>}
-        <Text wrap="truncate">{text}</Text>
+        <Text {...(textColor === undefined ? {} : { color: textColor })} wrap="truncate">
+          {text}
+        </Text>
         {end}
       </Box>
     </Box>
@@ -567,7 +577,15 @@ function stats(
       {context
         ? row('context', 'Context', context.percent, fillColor(context.percent), context.text, compact ?? undefined)
         : row('context', 'Context', 0, null, 'no reading yet', compact ?? undefined)}
-      {row('cache', 'Cache', cache.percent, cache.percent > 0 ? cacheColor(cache.percent) : null, cache.text)}
+      {row(
+        'cache',
+        'Cache',
+        cache.percent,
+        cache.percent > 0 ? cacheColor(cache.percent) : null,
+        cache.text,
+        undefined,
+        cache.isExpired ? 'error' : undefined,
+      )}
       {limits
         ? row('limits', 'Limits', limits.percent, limits.isRunningOut ? 'error' : fillColor(limits.percent), limits.text)
         : null}
@@ -644,8 +662,14 @@ function statsLine(el: StatsElements, s: Ranko, nowMs: number, width: number, on
         <Text dimColor>Context</Text>
         {context ? <Text color={fillColor(context.percent)}>{bar(context.percent)}</Text> : <Text dimColor>{bar(0)}</Text>}
         <Text>{context ? `${context.percent}%` : '–'}</Text>
-        <Text dimColor>· Cache</Text>
-        {cache.percent > 0 ? <Text color={cacheColor(cache.percent)}>{cache.short}</Text> : <Text dimColor>{cache.short}</Text>}
+        <Text dimColor>{cache.isExpired ? '·' : '· Cache'}</Text>
+        {cache.isExpired ? (
+          <Text color="error">{`Cache ${cache.short}`}</Text>
+        ) : cache.percent > 0 ? (
+          <Text color={cacheColor(cache.percent)}>{cache.short}</Text>
+        ) : (
+          <Text dimColor>{cache.short}</Text>
+        )}
         {limits ? <Text dimColor>· Limits</Text> : null}
         {limits ? (
           <Text color={limits.isRunningOut ? 'error' : fillColor(limits.percent)} wrap="truncate">

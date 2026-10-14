@@ -39,10 +39,20 @@ describe('stats', () => {
 
   test('the cache is warm for its stretch after a request, its bar running down, then expired', () => {
     const reading = { at: 0, input: 100, read: 9000, written: 900 }
-    expect(cacheOf(null, 300_000, 0)).toEqual({ percent: 0, text: 'no request yet', short: '–' })
-    expect(cacheOf(reading, 300_000, 60_000)).toEqual({ percent: 80, text: '4m left · 90% read', short: '4m' })
-    expect(cacheOf(reading, 300_000, 270_000)).toEqual({ percent: 10, text: '<1m left · 90% read', short: '<1m' })
-    expect(cacheOf(reading, 300_000, 420_000)).toEqual({ percent: 0, text: 'expired 2m ago', short: 'expired' })
+    expect(cacheOf(null, 300_000, 0)).toEqual({ percent: 0, isExpired: false, text: 'no request yet', short: '–' })
+    expect(cacheOf(reading, 300_000, 60_000)).toEqual({ percent: 80, isExpired: false, text: '4m left · 90% read', short: '4m' })
+    expect(cacheOf(reading, 300_000, 270_000)).toEqual({
+      percent: 10,
+      isExpired: false,
+      text: '<1m left · 90% read',
+      short: '<1m',
+    })
+    expect(cacheOf(reading, 300_000, 420_000)).toEqual({
+      percent: 0,
+      isExpired: true,
+      text: 'expired 2m ago (compact for fewer tokens)',
+      short: 'expired',
+    })
   })
 
   test('bars turn yellow, then red: a used-up share as it fills, the cache as its time runs out', () => {

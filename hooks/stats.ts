@@ -108,19 +108,20 @@ export function contextOf(usage: SessionUsage | null, autoCompactAt: number | nu
 /**
  * The cache: the share of its time left, for the bar, and how much longer it
  * stays warm with how much of the last request it served, or how long ago it
- * lapsed; `short` is the time left alone, for the collapsed line.
+ * lapsed, with the hint to compact first; `short` is the time left alone, for the
+ * collapsed line. A lapsed cache is drawn red.
  */
 export function cacheOf(reading: CacheReading | null, ttlMs: number, nowMs: number) {
   if (!reading) {
-    return { percent: 0, text: 'no request yet', short: '–' }
+    return { percent: 0, isExpired: false, text: 'no request yet', short: '–' }
   }
   const left = reading.at + ttlMs - nowMs
   if (left <= 0) {
-    return { percent: 0, text: `expired ${span(-left)} ago`, short: 'expired' }
+    return { percent: 0, isExpired: true, text: `expired ${span(-left)} ago (compact for fewer tokens)`, short: 'expired' }
   }
   const total = reading.input + reading.read + reading.written
   const hit = total > 0 ? ` · ${Math.round((reading.read / total) * 100)}% read` : ''
-  return { percent: Math.min(100, (left / ttlMs) * 100), text: `${span(left)} left${hit}`, short: span(left) }
+  return { percent: Math.min(100, (left / ttlMs) * 100), isExpired: false, text: `${span(left)} left${hit}`, short: span(left) }
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
