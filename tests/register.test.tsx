@@ -751,6 +751,19 @@ describe('register', () => {
     }
   })
 
+  test('a five-hour window used up turns the reading red with the bar', async ($, on) => {
+    answerTheWorld(on, 10, MANIFEST, [{ kind: 'five_hour', percentUsed: 100, resetsAt: '1970-01-01T04:30:00Z' }])
+    await $.session.start(START)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      await band.redraw()
+      expect((await band.find({ type: 'Text', text: '██████████' }))?.props.color).toBe('error')
+      const reading = await band.find({ type: 'Text', text: /^5h 100% ↻ \d\d:\d\d$/ })
+      expect(reading?.props.color).toBe('error')
+      await band.unmount()
+    }
+  })
+
   test('a lapsed cache says so in red, with the hint to compact, folded or not', async ($, on) => {
     const clock = answerTheWorld(on, 42)
     on('turn.step', async function* ($, e) {

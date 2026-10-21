@@ -519,7 +519,7 @@ async function compactNow($: EngineInterface, s: Ranko) {
  * else the session, a dim label, a bar and the reading. The context's row
  * ends in the Compact button. The limits' bar fills and colors with the
  * five-hour window's use, as the context's does; their reading turns yellow
- * when that window would run full before it resets.
+ * when that window would run full before it resets, and red once it has.
  */
 function stats(
   el: StatsElements,
@@ -599,7 +599,7 @@ function stats(
             fillColor(limits.percent),
             limits.text,
             undefined,
-            limits.isRunningOut ? 'warning' : undefined,
+            limits.isFull ? 'error' : limits.isRunningOut ? 'warning' : undefined,
           )
         : null}
       {tasks ? row('tasks', 'Tasks', tasks.percent, 'suggestion', tasks.text) : null}

@@ -65,6 +65,7 @@ describe('stats', () => {
     expect(limitsOf([{ kind: 'spend_limit', percentUsed: 7.5 }], 0)).toEqual({
       percent: 7.5,
       isRunningOut: false,
+      isFull: false,
       text: 'spend 8%',
       short: 'spend 8%',
     })

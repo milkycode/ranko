@@ -182,9 +182,10 @@ export function fullAt(limit: SessionRateLimit, nowMs: number, samples: readonly
 /**
  * The plan's usage limits, `5h 68% ↻ 17:40 (full ≈ 16:10) · 7d 41% ↻ Mon
  * 09:00 (lasts)`, the session window's share for the bar (the five hours, or
- * the first limit there is), and whether that window runs full before it
- * resets; `short` is the shares alone, `5h 68% · 7d 41%`, for the collapsed
- * line; null with none. `samples` are the five-hour window's readings.
+ * the first limit there is), whether that window runs full before it resets
+ * and whether it is full already; `short` is the shares alone, `5h 68% · 7d
+ * 41%`, for the collapsed line; null with none. `samples` are the five-hour
+ * window's readings.
  */
 export function limitsOf(limits: readonly SessionRateLimit[], nowMs: number, samples: readonly LimitSample[] = []) {
   const names: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
@@ -206,7 +207,7 @@ export function limitsOf(limits: readonly SessionRateLimit[], nowMs: number, sam
     })
     .join(' · ')
   const short = limits.map(limit => `${names[limit.kind] ?? limit.kind} ${Math.round(limit.percentUsed)}%`).join(' · ')
-  return { percent: session.percentUsed, isRunningOut, text, short }
+  return { percent: session.percentUsed, isRunningOut, isFull: session.percentUsed >= 100, text, short }
 }
 
 /**
