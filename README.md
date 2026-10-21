@@ -31,7 +31,7 @@ Each row has a bar and a reading:
 | :-- | :-- |
 | **Context** | How full the context window is, in percent and tokens, and how many tokens are left before auto-compaction runs. From 15% on a Compact button sits beside it; it stands out in the last tenth before auto-compaction, or from 80% without it. |
 | **Cache** | How long the prompt cache stays warm after the last request, and how much of that request it served. Once it lapses, the next request pays for the whole prompt again. |
-| **Limits** | Your plan's 5-hour and weekly use, when each resets, and when each runs full at the pace you are using it. The bar turns red when the 5-hour window would run out before it resets. |
+| **Limits** | Your plan's 5-hour and weekly use, when each resets, and when each runs full at the pace you are using it. The bar shows the 5-hour window's use, green, yellow from half and red from 80%; the reading turns yellow when that window would run out before it resets. |
 | **Tasks** | While Claude keeps a task list: how many tasks are done and the one under way. |
 | **Session** | Without a task list: how long the session has run, its turns, the agents, background shells and wakeups under way, and the turn under way or the last one. Its bar shows how much of the 5-hour window has passed, to set beside how much of it is used. |
 

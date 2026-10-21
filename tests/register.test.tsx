@@ -736,6 +736,21 @@ describe('register', () => {
     await later.unmount()
   })
 
+  test('the limits bar is colored by their use; one running full before its reset turns the reading yellow', async ($, on) => {
+    // Half an hour into the five hours, 19% used: at that pace the window runs
+    // full in a little over two hours, well before it resets.
+    answerTheWorld(on, 10, MANIFEST, [{ kind: 'five_hour', percentUsed: 19, resetsAt: '1970-01-01T04:30:00Z' }])
+    await $.session.start(START)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      await band.redraw()
+      expect((await band.find({ type: 'Text', text: '██░░░░░░░░' }))?.props.color).toBe('success')
+      const reading = await band.find({ type: 'Text', text: /^5h 19% ↻ \d\d:\d\d \(full ≈ \d\d:\d\d\)$/ })
+      expect(reading?.props.color).toBe('warning')
+      await band.unmount()
+    }
+  })
+
   test('a lapsed cache says so in red, with the hint to compact, folded or not', async ($, on) => {
     const clock = answerTheWorld(on, 42)
     on('turn.step', async function* ($, e) {

@@ -517,8 +517,9 @@ async function compactNow($: EngineInterface, s: Ranko) {
  * The stats beside Ranko, the same on every surface: a row each for the
  * context, the cache, the limits and Claude's task list while there is one,
  * else the session, a dim label, a bar and the reading. The context's row
- * ends in the Compact button. The limits' bar turns red when the five-hour
- * window would run full before it resets.
+ * ends in the Compact button. The limits' bar fills and colors with the
+ * five-hour window's use, as the context's does; their reading turns yellow
+ * when that window would run full before it resets.
  */
 function stats(
   el: StatsElements,
@@ -550,6 +551,8 @@ function stats(
   const compact = compactButton(el, s, onCompact)
   // A dim label, a bar in the reading's color (or dim, empty, with none), the
   // reading, in a color of its own when it warns, and what else the row holds.
+  // Too narrow a row cuts the reading short: the label, the bar and the end
+  // keep their width, or the bar would wrap onto the next row.
   const row = (
     key: string,
     label: string,
@@ -560,15 +563,17 @@ function stats(
     textColor?: string,
   ) => (
     <Box key={key} flexDirection="row">
-      <Box width={STATS_LABEL_COLUMNS}>
+      <Box width={STATS_LABEL_COLUMNS} flexShrink={0}>
         <Text dimColor>{label}</Text>
       </Box>
       <Box flexDirection="row" gap={1}>
-        {barColor ? <Text color={barColor}>{bar(percent)}</Text> : <Text dimColor>{bar(0)}</Text>}
+        <Box flexShrink={0}>
+          {barColor ? <Text color={barColor}>{bar(percent)}</Text> : <Text dimColor>{bar(0)}</Text>}
+        </Box>
         <Text {...(textColor === undefined ? {} : { color: textColor })} wrap="truncate">
           {text}
         </Text>
-        {end}
+        {end ? <Box flexShrink={0}>{end}</Box> : null}
       </Box>
     </Box>
   )
@@ -587,7 +592,15 @@ function stats(
         cache.isExpired ? 'error' : undefined,
       )}
       {limits
-        ? row('limits', 'Limits', limits.percent, limits.isRunningOut ? 'error' : fillColor(limits.percent), limits.text)
+        ? row(
+            'limits',
+            'Limits',
+            limits.percent,
+            fillColor(limits.percent),
+            limits.text,
+            undefined,
+            limits.isRunningOut ? 'warning' : undefined,
+          )
         : null}
       {tasks ? row('tasks', 'Tasks', tasks.percent, 'suggestion', tasks.text) : null}
       {session ? row('session', 'Session', session.percent ?? 0, session.percent === null ? null : 'suggestion', session.text) : null}
@@ -660,7 +673,9 @@ function statsLine(el: StatsElements, s: Ranko, nowMs: number, width: number, on
     <Box key="stats-line" flexDirection="row" justifyContent="space-between" width={width}>
       <Box flexDirection="row" gap={1}>
         <Text dimColor>Context</Text>
-        {context ? <Text color={fillColor(context.percent)}>{bar(context.percent)}</Text> : <Text dimColor>{bar(0)}</Text>}
+        <Box flexShrink={0}>
+          {context ? <Text color={fillColor(context.percent)}>{bar(context.percent)}</Text> : <Text dimColor>{bar(0)}</Text>}
+        </Box>
         <Text>{context ? `${context.percent}%` : '–'}</Text>
         <Text dimColor>{cache.isExpired ? '·' : '· Cache'}</Text>
         {cache.isExpired ? (
@@ -672,7 +687,7 @@ function statsLine(el: StatsElements, s: Ranko, nowMs: number, width: number, on
         )}
         {limits ? <Text dimColor>· Limits</Text> : null}
         {limits ? (
-          <Text color={limits.isRunningOut ? 'error' : fillColor(limits.percent)} wrap="truncate">
+          <Text color={fillColor(limits.percent)} wrap="truncate">
             {limits.short}
           </Text>
         ) : null}
