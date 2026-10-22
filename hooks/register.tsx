@@ -15,7 +15,7 @@ import type {
 
 import type { GrabMessage, GrabProps } from './grab'
 import type { PressMessage, PressProps } from './press'
-import { FEATURES, LEAVE_FRAMES, Pet, commandSuggestions, isManifest, moodOf, propFor, sizeFor } from './pet'
+import { FEATURES, LEAVE_FRAMES, Pet, commandSuggestions, isManifest, moodOf, propFor, propForAgent, sizeFor } from './pet'
 import type { Feature, Manifest, Mini } from './pet'
 import {
   COMPACT_FROM,
@@ -1030,7 +1030,7 @@ export function register(on: On, options: PluginOptions) {
       if (s.turn) {
         s.turn.tools += 1
       }
-      const prop = propFor(e.tool)
+      const prop = e.tool === 'Agent' ? propForAgent(e.subagent_type) : propFor(e.tool)
       if (pet && prop) {
         pet.toolStarted(e.tool_use_id, prop, await $.clock.now())
       }
@@ -1093,9 +1093,11 @@ export function register(on: On, options: PluginOptions) {
     return next(e)
   })
 
+  // An agent that stands in for a tool (web-fetch) holds up the tool's prop
+  // at its Agent call instead of getting a mini.
   on('agent.spawn', async ($, e, next) => {
     const result = await next(e)
-    if (s.pet && s.isOn('miniRankos') && result.agentId) {
+    if (s.pet && s.isOn('miniRankos') && result.agentId && !propForAgent(e.subagentType)) {
       s.pet.spawnMini(result.agentId)
       s.host?.sound('mini')
       $.ui.invalidate('ui.render')

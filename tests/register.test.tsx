@@ -639,6 +639,35 @@ describe('register', () => {
     })
   }
 
+  test('a web-fetch agent is a web lookup: binoculars for as long as it runs, and no mini', async ($, on) => {
+    const clock = answerTheWorld(on)
+    let finish = () => {}
+    on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+    on('tool.call', () =>
+      new Promise(resolve => {
+        finish = () => resolve({ result: 'ok', text: 'ok' })
+      }),
+    )
+    await $.session.start(START)
+    const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    await $.turn.start({ text: 'read the post', turnId: 't1' })
+
+    const fetch = { prompt: 'Fetch https://example.com', description: 'Fetch the post' }
+    const call = $.tool.call({ tool: 'Agent', ...fetch, subagent_type: 'web-fetch' } as never)
+    await $.agent.spawn({ tool_use_id: 'u1', ...fetch, subagentType: 'web-fetch' } as never)
+    await clock.settle()
+    await clock.advance(5000)
+    expect(await shownClip(band)).toBe('working-binoculars')
+    expect(await band.find({ key: 'mini-a1' })).toBeUndefined()
+
+    await complete($, 'agent-turn', 5000, 'answer', 'a1')
+    finish()
+    await call
+    await clock.advance(100)
+    expect(await shownClip(band)).toBe('working')
+    await band.unmount()
+  })
+
   test('on the desktop a mini Ranko stands beside him and fades as it leaves', async ($, on) => {
     const clock = answerTheWorld(on)
     on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))

@@ -58,7 +58,8 @@ Each row has a bar and a reading:
   magnifier to read or search, a notepad to edit or keep the task list,
   binoculars for the web and the browser. While Claude thinks, he puts a
   finger to his chin and looks up. Each subagent gets a mini Ranko beside
-  him, which walks off when it is done.
+  him, which walks off when it is done; a web-fetch agent, which reads a
+  page where Claude has no web tool of its own, gets the binoculars instead.
 - **When you are wanted.** When Claude waits for your permission or for your
   answer to a question, he stops typing, stands up and waves, then says psst
   every half minute until you answer.

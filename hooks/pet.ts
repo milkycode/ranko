@@ -127,9 +127,20 @@ const PROP_FOR_TOOL: Record<string, Prop> = {
 // name: Chrome, the built-in browser, Playwright and the like.
 const BROWSING = /^mcp__.*(browser|chrome|playwright|puppeteer|firecrawl|fetch)/i
 
+// Agents that stand in for a tool: web-fetch reads a page where the session
+// has no WebFetch of its own. Its Agent call holds the tool's prop, and it
+// gets no mini Ranko.
+const PROP_FOR_AGENT: Record<string, Prop> = {
+  'web-fetch': 'binoculars',
+}
+
 /** The prop Ranko holds while a tool runs, if it has one. */
 export const propFor = (tool: string): Prop | undefined =>
   PROP_FOR_TOOL[tool] ?? (BROWSING.test(tool) ? 'binoculars' : undefined)
+
+/** The prop of the tool an agent type stands in for, if it does. */
+export const propForAgent = (type: string | undefined): Prop | undefined =>
+  type === undefined ? undefined : PROP_FOR_AGENT[type]
 
 export const sizeFor = (percent: number): Size =>
   percent >= 80 ? 'stuffed' : percent >= 50 ? 'plump' : 'normal'

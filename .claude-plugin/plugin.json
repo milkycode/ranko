@@ -52,7 +52,7 @@
     "miniRankos": {
       "type": "boolean",
       "title": "Mini Rankos",
-      "description": "Each running subagent gets a half-size Ranko beside the main one; it walks off when the subagent finishes.",
+      "description": "Each running subagent gets a half-size Ranko beside the main one; it walks off when the subagent finishes. A web-fetch agent gets the binoculars instead.",
       "required": false,
       "default": true
     },
