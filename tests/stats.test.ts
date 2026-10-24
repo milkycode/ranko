@@ -68,6 +68,7 @@ describe('stats', () => {
       isFull: false,
       text: 'spend 8%',
       short: 'spend 8%',
+      parts: [{ name: 'spend', percent: 8, after: '' }],
     })
 
     const fiveHours = '2030-01-07T17:40:00Z'
@@ -81,6 +82,10 @@ describe('stats', () => {
     expect(shown?.percent).toBe(23)
     expect(shown?.isRunningOut).toBe(false)
     expect(shown?.short).toBe('7d 41% · 5h 23%')
+    expect(shown?.parts.map(part => [part.name, part.percent])).toEqual([
+      ['7d', 41],
+      ['5h', 23],
+    ])
     expect(shown?.text).toMatch(/^7d 41% ↻ \w{3} \d\d:\d\d \(full ≈ \w{3} \d\d:\d\d\) · 5h 23% ↻ \d\d:\d\d \(lasts\)$/)
   })
 

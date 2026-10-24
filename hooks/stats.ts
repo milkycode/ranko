@@ -180,12 +180,23 @@ export function fullAt(limit: SessionRateLimit, nowMs: number, samples: readonly
 }
 
 /**
+ * One limit as the band reads it: its window's name, `7d`, the share of it
+ * used, whole, and what follows that, ` ↻ Mon 09:00 (lasts)`.
+ */
+export type LimitPart = { name: string; percent: number; after: string }
+
+/** Limits read one after another, `5h 68% ↻ 17:40 · 7d 41% ↻ Mon 09:00`; without what follows, the shares alone. */
+export const limitsText = (parts: readonly LimitPart[], withAfter = true) =>
+  parts.map(part => `${part.name} ${part.percent}%${withAfter ? part.after : ''}`).join(' · ')
+
+/**
  * The plan's usage limits, `5h 68% ↻ 17:40 (full ≈ 16:10) · 7d 41% ↻ Mon
  * 09:00 (lasts)`, the session window's share for the bar (the five hours, or
  * the first limit there is), whether that window runs full before it resets
  * and whether it is full already; `short` is the shares alone, `5h 68% · 7d
- * 41%`, for the collapsed line; null with none. `samples` are the five-hour
- * window's readings.
+ * 41%`, for the collapsed line, and `parts` the limits one by one, so their
+ * shares can be colored; null with none. `samples` are the five-hour window's
+ * readings.
  */
 export function limitsOf(limits: readonly SessionRateLimit[], nowMs: number, samples: readonly LimitSample[] = []) {
   const names: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: 'spend' }
@@ -194,20 +205,24 @@ export function limitsOf(limits: readonly SessionRateLimit[], nowMs: number, sam
     return null
   }
   let isRunningOut = false
-  const text = limits
-    .map(limit => {
-      const reset = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
-      const full = fullAt(limit, nowMs, limit.kind === 'five_hour' ? samples : [])
-      if (limit === session && typeof full === 'number') {
-        isRunningOut = true
-      }
-      const forecast = full === null ? '' : full === 'lasts' ? ' (lasts)' : ` (full ≈ ${clockAt(full, nowMs)})`
-      const resets = Number.isNaN(reset) ? '' : ` ${RESET_MARK} ${clockAt(reset, nowMs)}`
-      return `${names[limit.kind] ?? limit.kind} ${Math.round(limit.percentUsed)}%${resets}${forecast}`
-    })
-    .join(' · ')
-  const short = limits.map(limit => `${names[limit.kind] ?? limit.kind} ${Math.round(limit.percentUsed)}%`).join(' · ')
-  return { percent: session.percentUsed, isRunningOut, isFull: session.percentUsed >= 100, text, short }
+  const parts = limits.map((limit): LimitPart => {
+    const reset = limit.resetsAt === undefined ? Number.NaN : Date.parse(limit.resetsAt)
+    const full = fullAt(limit, nowMs, limit.kind === 'five_hour' ? samples : [])
+    if (limit === session && typeof full === 'number') {
+      isRunningOut = true
+    }
+    const forecast = full === null ? '' : full === 'lasts' ? ' (lasts)' : ` (full ≈ ${clockAt(full, nowMs)})`
+    const resets = Number.isNaN(reset) ? '' : ` ${RESET_MARK} ${clockAt(reset, nowMs)}`
+    return { name: names[limit.kind] ?? limit.kind, percent: Math.round(limit.percentUsed), after: `${resets}${forecast}` }
+  })
+  return {
+    percent: session.percentUsed,
+    isRunningOut,
+    isFull: session.percentUsed >= 100,
+    text: limitsText(parts),
+    short: limitsText(parts, false),
+    parts,
+  }
 }
 
 /**

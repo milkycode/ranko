@@ -6,6 +6,7 @@ import type {
   EngineInterface,
   On,
   PluginOptions,
+  RenderChildren,
   RenderElement,
   SessionCompacted,
   SessionMessage,
@@ -38,7 +39,7 @@ import {
   tasksOf,
   tokens,
 } from './stats'
-import type { CacheReading, LimitSample, PlanReading, SessionFacts, Task } from './stats'
+import type { CacheReading, LimitPart, LimitSample, PlanReading, SessionFacts, Task } from './stats'
 
 /**
  * Ranko above the prompt: frames baked by blender/bake.py, played
@@ -519,7 +520,8 @@ async function compactNow($: EngineInterface, s: Ranko) {
  * else the session, a dim label, a bar and the reading. The context's row
  * ends in the Compact button. The limits' bar fills and colors with the
  * five-hour window's use, as the context's does; their reading turns yellow
- * when that window would run full before it resets, and red once it has.
+ * when that window would run full before it resets, and red once it has, and
+ * each limit's share in it is colored by its own use, as a bar would be.
  */
 function stats(
   el: StatsElements,
@@ -558,7 +560,7 @@ function stats(
     label: string,
     percent: number,
     barColor: string | null,
-    text: string,
+    text: RenderChildren,
     end?: RenderElement,
     textColor?: string,
   ) => (
@@ -597,7 +599,7 @@ function stats(
             'Limits',
             limits.percent,
             fillColor(limits.percent),
-            limits.text,
+            limitsReading(el, limits.parts, true),
             undefined,
             limits.isFull ? 'error' : limits.isRunningOut ? 'warning' : undefined,
           )
@@ -606,6 +608,21 @@ function stats(
       {session ? row('session', 'Session', session.percent ?? 0, session.percent === null ? null : 'suggestion', session.text) : null}
     </Box>
   )
+}
+
+/**
+ * The limits read one after another, each share in the color of its use, as
+ * the bars have it: green, yellow from half, red from 80%. What follows a
+ * share, its reset and forecast, only `withAfter`; the rest is the color of
+ * the Text it stands in.
+ */
+function limitsReading(el: StatsElements, parts: readonly LimitPart[], withAfter: boolean) {
+  const { Text } = el
+  return parts.flatMap((part, i) => [
+    `${i > 0 ? ' · ' : ''}${part.name} `,
+    <Text key={`share-${i}`} color={fillColor(part.percent)}>{`${part.percent}%`}</Text>,
+    ...(withAfter && part.after !== '' ? [part.after] : []),
+  ])
 }
 
 /**
@@ -686,11 +703,7 @@ function statsLine(el: StatsElements, s: Ranko, nowMs: number, width: number, on
           <Text dimColor>{cache.short}</Text>
         )}
         {limits ? <Text dimColor>· Limits</Text> : null}
-        {limits ? (
-          <Text color={fillColor(limits.percent)} wrap="truncate">
-            {limits.short}
-          </Text>
-        ) : null}
+        {limits ? <Text wrap="truncate">{limitsReading(el, limits.parts, false)}</Text> : null}
         {compactButton(el, s, onCompact)}
       </Box>
       {foldButton(el, true, onExpand)}

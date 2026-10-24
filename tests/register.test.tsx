@@ -776,6 +776,8 @@ describe('register', () => {
       expect((await band.find({ type: 'Text', text: '██░░░░░░░░' }))?.props.color).toBe('success')
       const reading = await band.find({ type: 'Text', text: /^5h 19% ↻ \d\d:\d\d \(full ≈ \d\d:\d\d\)$/ })
       expect(reading?.props.color).toBe('warning')
+      // The share itself keeps the color of its use.
+      expect((await band.find({ type: 'Text', text: /^19%$/ }))?.props.color).toBe('success')
       await band.unmount()
     }
   })
@@ -789,6 +791,30 @@ describe('register', () => {
       expect((await band.find({ type: 'Text', text: '██████████' }))?.props.color).toBe('error')
       const reading = await band.find({ type: 'Text', text: /^5h 100% ↻ \d\d:\d\d$/ })
       expect(reading?.props.color).toBe('error')
+      await band.unmount()
+    }
+  })
+
+  test("each limit's share is colored by its own use, as a bar is, folded or not", async ($, on) => {
+    answerTheWorld(on, 10, MANIFEST, [
+      { kind: 'five_hour', percentUsed: 23, resetsAt: '2030-01-07T17:40:00Z' },
+      { kind: 'seven_day', percentUsed: 79.6, resetsAt: '2030-01-13T09:00:00Z' },
+      { kind: 'spend_limit', percentUsed: 50 },
+    ])
+    await $.session.start(START)
+    const shareColors = async (band: AnyBand) =>
+      Promise.all(['23%', '80%', '50%'].map(async share => (await band.find({ type: 'Text', text: new RegExp(`^${share}$`) }))?.props.color))
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const band = await $.ui.mount({ ...BAND, surface })
+      await band.redraw()
+      const reading = await band.find({ type: 'Text', text: /^5h 23% ↻ .+ · 7d 80% ↻ .+ · spend 50%$/ })
+      expect(reading?.props.color).toBeUndefined()
+      // The share as shown: 79.6% reads 80%, and is red.
+      expect(await shareColors(band)).toEqual(['success', 'error', 'warning'])
+      await pressButton(band, 'collapse')
+      expect(await band.find({ type: 'Text', text: /^5h 23% · 7d 80% · spend 50%$/ })).toBeDefined()
+      expect(await shareColors(band)).toEqual(['success', 'error', 'warning'])
+      await pressButton(band, 'expand')
       await band.unmount()
     }
   })
